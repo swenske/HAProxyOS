@@ -4,12 +4,14 @@ MODULE  := github.com/swenske/HAProxyOS
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-BIN_DIR  := bin
-BINARIES := haproxyosd haproxyosctl
+BIN_DIR   := bin
+BINARIES  := haproxyosd haproxyosctl
+BUILD_DIR := build
 
 GEN_DIR := gen
 
-.PHONY: all build test vet lint proto clean kernel-menuconfig
+.PHONY: all build test vet lint proto clean kernel-menuconfig \
+	kernel-build init initramfs qemu-boot-test
 
 all: build
 
@@ -57,3 +59,28 @@ kernel-menuconfig:
 		haproxyos-kernel-config \
 		sh -c 'make menuconfig && cp .config /out/haproxyos_defconfig'
 	@echo "Updated kernel/configs/haproxyos_defconfig - review with 'git diff' and commit."
+
+# Builds bzImage from kernel/configs/haproxyos_defconfig via kernel/
+# Dockerfile's "export" stage (needs Docker Buildx - `docker buildx
+# version` to check) and pulls it out to build/bzImage.
+kernel-build:
+	mkdir -p $(BUILD_DIR)
+	docker build --target export --build-arg KERNEL_VERSION=$(KERNEL_VERSION) \
+		-o $(BUILD_DIR) kernel
+
+# Builds the Phase 1 PID 1 (rootfs/init) as a static binary - CGO must stay
+# disabled since the target has no libc.
+init:
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" \
+		-o $(BUILD_DIR)/init ./rootfs/init
+
+# Packages build/init into build/initramfs.cpio.gz (see hack/build-initramfs.sh).
+initramfs: init
+	./hack/build-initramfs.sh $(BUILD_DIR)/init $(BUILD_DIR)/initramfs.cpio.gz
+
+# The Phase 1 boot-proof: builds the kernel + initramfs and boots them
+# under QEMU, checking for rootfs/init's success marker on the console
+# (see hack/qemu-run.sh). Requires qemu-system-x86_64 on PATH.
+qemu-boot-test: kernel-build initramfs
+	./hack/qemu-run.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs.cpio.gz

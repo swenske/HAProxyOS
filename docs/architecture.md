@@ -111,10 +111,24 @@ plan - not implemented yet.
 
 ## Roadmap
 
-- **Phase 0** (this scaffolding): repo structure, gRPC contract, CI/CD
-  skeleton, build-system placeholders.
-- **Phase 1**: minimal kernel + shell-less init that boots under QEMU (no
-  HAProxy, no API yet).
+- **Phase 0** (done): repo structure, gRPC contract, CI/CD skeleton,
+  build-system placeholders.
+- **Phase 1** (boot proof done): a from-allnoconfig, 1610-line explicit
+  kernel config (`kernel/configs/haproxyos_defconfig` - no network, no
+  disk/block drivers, no ACPI, initramfs-only) boots under QEMU with
+  `rootfs/init` - a plain `CGO_ENABLED=0` Go binary - as PID 1. Verified
+  end-to-end via `make qemu-boot-test` (`kernel/Dockerfile`'s `build`/
+  `export` stages + `hack/build-initramfs.sh` + `hack/qemu-run.sh`), both
+  locally and via the identical Docker build on `haproxyos-runner01`
+  (`image-build.yml`).
+  Turned out **not to need `pkgs/musl-toolchain` or `pkgs/busybox` at
+  all**: a statically-linked Go binary needs no libc, so there's nothing
+  for PID 1 to link against - those two `pkgs/` placeholders stay
+  `FROM scratch` until something written in C (HAProxy, bird, keepalived)
+  actually needs a toolchain, which is Phase 2+.
+  Still open for Phase 1: real rootfs assembly beyond a single init binary
+  (`rootfs/assemble.sh` still a stub) isn't needed yet either, since the
+  initramfs *is* the whole rootfs for this boot-proof milestone.
 - **Phase 2**: HAProxy integration, `HAProxyService` fully implemented,
   HAProxyOS's own Prometheus exporter (distinct from HAProxy's built-in
   one), mTLS/PKI (`internal/pki`).

@@ -1,6 +1,10 @@
 # rootfs/init
 
-TODO(Phase 1): custom PID 1 (Go, not systemd) - mounts the squashfs
-rootfs + ephemeral overlay, starts `haproxyosd`, supervises the managed
-services it controls (`haproxy`, and optionally `bird`/`keepalived`).
-Empty placeholder for now - see `../../docs/architecture.md`.
+`main.go` is the Phase 1 boot-proof PID 1: mounts proc/sysfs/devtmpfs,
+prints `HAPROXYOS_INIT_BOOT_OK`, powers off. Built and tested via
+`make qemu-boot-test` (see `../../Makefile` and `../../hack/qemu-run.sh`).
+
+TODO(Phase 2): the real init - mounts the squashfs rootfs + ephemeral
+overlay, starts `haproxyosd`, supervises the managed services it controls
+(`haproxy`, and optionally `bird`/`keepalived`). See
+`../../docs/architecture.md`.

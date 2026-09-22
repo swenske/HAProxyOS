@@ -5,12 +5,12 @@
 # from ci.yml (GitHub-hosted, safe for forks).
 #
 # workflow_dispatch only, on purpose - never triggered by push/pull_request.
-# There's nothing real to build yet: kernel/Dockerfile has no "build"
-# stage, pkgs/* (besides pkgs/haproxy's source fetch) are placeholders,
-# and rootfs/assemble.sh deliberately exits 1. This workflow exists to
-# pin down the shape of the pipeline now; the steps below are filled in
-# phase by phase (see docs/architecture.md's roadmap) rather than added
-# all at once later.
+# Phase 1 (kernel + shell-less init boots under QEMU) is real as of this
+# workflow's "kernel-build" and "qemu-boot-test" steps below - verified
+# both locally and by running this exact workflow. Everything past that
+# (pkgs/* beyond haproxy's source fetch, rootfs/assemble.sh, image/*) is
+# still a stub - filled in phase by phase (see docs/architecture.md's
+# roadmap) rather than added all at once.
 name: Image Build
 
 on:
@@ -29,21 +29,40 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Fetch + verify pinned kernel source
-        run: docker build --target fetch --build-arg KERNEL_VERSION=$(grep '^KERNEL_VERSION' versions.mk | cut -d= -f2 | xargs) kernel
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
 
       - name: Fetch pinned HAProxy source
         run: docker build --build-arg HAPROXY_VERSION=$(grep '^HAPROXY_VERSION' versions.mk | cut -d= -f2 | xargs) pkgs/haproxy
 
-      # TODO(Phase 1): build the kernel from configs/haproxyos_defconfig,
-      # build pkgs/musl-toolchain and pkgs/busybox, run rootfs/assemble.sh.
-      # TODO(Phase 2): build pkgs/haproxy for real (static, musl).
-      # TODO(Phase 3): image/disk (A/B + dm-verity + UKI + Secure Boot),
-      # image/iso, image/kvm-proxmox, image/vmware, boot-test via
-      # hack/qemu-run.sh, upload artifacts to a GitHub Release.
+      # Builds bzImage from kernel/configs/haproxyos_defconfig (kernel/
+      # Dockerfile's fetch -> config -> build -> export stages) and pulls
+      # it out to build/bzImage.
+      - name: Build kernel
+        run: make kernel-build
+
+      # Static Go PID 1 + initramfs packaging (see rootfs/init,
+      # hack/build-initramfs.sh) - no pkgs/musl-toolchain or pkgs/busybox
+      # needed for this: a CGO_ENABLED=0 Go binary has no libc to link
+      # against (see docs/architecture.md's Phase 1 notes).
+      - name: Build initramfs
+        run: make initramfs
+
+      # Boots the kernel + initramfs under QEMU and checks for rootfs/
+      # init's success marker on the console (see hack/qemu-run.sh).
+      - name: Install QEMU
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-system-x86
+
+      - name: Boot test under QEMU
+        run: ./hack/qemu-run.sh build/bzImage build/initramfs.cpio.gz
+
+      # TODO(Phase 2): build pkgs/haproxy for real (static, musl - needs
+      # pkgs/musl-toolchain filled in first), wire up HAProxyService.
+      # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
+      # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
+      # upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.
-      - name: Remaining build stages
-        run: |
-          echo "Not implemented yet - see the TODOs above and docs/architecture.md's roadmap." >&2
-          exit 1
