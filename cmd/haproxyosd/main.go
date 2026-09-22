@@ -19,6 +19,7 @@ import (
 
 	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
 	"github.com/swenske/HAProxyOS/internal/api"
+	"github.com/swenske/HAProxyOS/internal/haproxy"
 )
 
 // version is set via -ldflags "-X main.version=..." by the release build
@@ -28,6 +29,10 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print the daemon version and exit")
 	addr := flag.String("addr", ":9505", "gRPC listen address")
+	haproxyBin := flag.String("haproxy-binary", "/usr/local/sbin/haproxy", "path to the haproxy binary")
+	haproxyCfg := flag.String("haproxy-config", "/etc/haproxy/haproxy.cfg", "path to haproxy's active config file")
+	haproxyPid := flag.String("haproxy-pid", "/run/haproxyos/haproxy.pid", "path to haproxy's pid file")
+	haproxySock := flag.String("haproxy-stats-socket", "/run/haproxyos/haproxy-admin.sock", "path to haproxy's stats socket (must match the 'stats socket' line in haproxy-config)")
 	flag.Parse()
 
 	if *showVersion {
@@ -40,10 +45,22 @@ func main() {
 		log.Fatalf("listen on %s: %v", *addr, err)
 	}
 
+	haproxyMgr := haproxy.NewManager(*haproxyBin, *haproxyCfg, *haproxyPid, *haproxySock)
+
+	// Start haproxy from whatever config is already on disk (the
+	// bootstrap default at first boot - see rootfs/base/etc/haproxy -
+	// or the last config ApplyConfig wrote), so a node runs HAProxy from
+	// boot without needing an API call first. Not fatal: a dev build
+	// without the haproxy binary in place should still serve the gRPC
+	// API for everything else.
+	if err := haproxyMgr.Reload(); err != nil {
+		log.Printf("haproxy: initial start failed (continuing without it): %v", err)
+	}
+
 	srv := grpc.NewServer()
 	haproxyosv1alpha1.RegisterSystemServiceServer(srv, &api.System{BuildVersion: version})
 	haproxyosv1alpha1.RegisterLifecycleServiceServer(srv, &api.Lifecycle{})
-	haproxyosv1alpha1.RegisterHAProxyServiceServer(srv, &api.HAProxy{})
+	haproxyosv1alpha1.RegisterHAProxyServiceServer(srv, &api.HAProxy{Manager: haproxyMgr})
 	haproxyosv1alpha1.RegisterNetworkServiceServer(srv, &api.Network{})
 
 	log.Printf("haproxyosd %s listening on %s", version, *addr)

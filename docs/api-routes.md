@@ -58,14 +58,14 @@ Status column: ✅ implemented · ⬜ contract defined, returns
 
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
-| `GetConfig` | | ⬜ | Current `haproxy.cfg` |
-| `ApplyConfig` | server | ⬜ | Validate (`haproxy -c`) then seamless-reload |
-| `ValidateConfig` | | ⬜ | Dry-run validation only |
-| `Reload` | | ⬜ | Seamless reload of the current config |
-| `Stats` | | ⬜ | Proxy of the HAProxy stats socket `show stat` |
-| `ShowInfo` | | ⬜ | Proxy of `show info` |
+| `GetConfig` | | ✅ | Current `haproxy.cfg` |
+| `ApplyConfig` | server | ✅ | Validate (`haproxy -c`) then seamless-reload (`-sf <pid>`) |
+| `ValidateConfig` | | ✅ | Dry-run validation only |
+| `Reload` | | ✅ | Seamless reload of the current config |
+| `Stats` | | ✅ | Proxy of the HAProxy stats socket `show stat` (raw CSV) |
+| `ShowInfo` | | ✅ | Proxy of `show info` (version/uptime/connections) |
 | `BackendList` | | ⬜ | |
-| `ServerSetState` | | ⬜ | Runtime enable/drain/maint a backend server |
+| `ServerSetState` | | ✅ | Runtime enable/drain/maint a backend server |
 | `MapList` / `MapGet` / `MapUpdate` | | ⬜ | Runtime maps |
 | `ACLUpdate` | | ⬜ | Runtime ACL entries |
 | `CertificateList` / `Upload` / `Delete` | | ⬜ | SSL termination certificates |

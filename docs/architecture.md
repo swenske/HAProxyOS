@@ -129,9 +129,13 @@ plan - not implemented yet.
   Still open for Phase 1: real rootfs assembly beyond a single init binary
   (`rootfs/assemble.sh` still a stub) isn't needed yet either, since the
   initramfs *is* the whole rootfs for this boot-proof milestone.
-- **Phase 2**: HAProxy integration, `HAProxyService` fully implemented,
-  HAProxyOS's own Prometheus exporter (distinct from HAProxy's built-in
-  one), mTLS/PKI (`internal/pki`).
+- **Phase 2** (in progress): HAProxy integration (static musl build,
+  supervised by `haproxyosd`), `HAProxyService` fully implemented, mTLS/PKI
+  (`internal/pki`). HAProxy's own metrics keep using its **built-in**
+  Prometheus exporter (`internal/haproxy` just proxies the runtime
+  socket/config, it doesn't reimplement metrics export) - `internal/
+  exporter` (HAProxyOS's own, system-level, built on top of the gRPC API)
+  is explicitly **deferred past Phase 2**, not part of this phase.
 - **Phase 3**: real immutability - A/B, dm-verity, UKI, Secure Boot,
   `LifecycleService.Install`/`Upgrade`/`Rollback`.
 - **Phase 4**: SELinux policy + full CIS hardening pass.

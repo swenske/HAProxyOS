@@ -11,7 +11,7 @@ BUILD_DIR := build
 GEN_DIR := gen
 
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
-	kernel-build init initramfs qemu-boot-test
+	kernel-build init initramfs qemu-boot-test haproxy-build
 
 all: build
 
@@ -84,3 +84,12 @@ initramfs: init
 # (see hack/qemu-run.sh). Requires qemu-system-x86_64 on PATH.
 qemu-boot-test: kernel-build initramfs
 	./hack/qemu-run.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs.cpio.gz
+
+# Builds a fully static (musl, via Alpine's own toolchain - see pkgs/
+# haproxy/Dockerfile) haproxy binary with OpenSSL and pulls it out to
+# build/haproxy. No PCRE2 (Alpine ships no static pcre2-posix lib;
+# HAProxy's built-in regex engine covers Phase 2's needs).
+haproxy-build:
+	mkdir -p $(BUILD_DIR)
+	docker build --target export --build-arg HAPROXY_VERSION=$(HAPROXY_VERSION) \
+		-o $(BUILD_DIR) pkgs/haproxy

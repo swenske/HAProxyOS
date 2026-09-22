@@ -5,11 +5,10 @@
 # from ci.yml (GitHub-hosted, safe for forks).
 #
 # workflow_dispatch only, on purpose - never triggered by push/pull_request.
-# Phase 1 (kernel + shell-less init boots under QEMU) is real as of this
-# workflow's "kernel-build" and "qemu-boot-test" steps below - verified
-# both locally and by running this exact workflow. Everything past that
-# (pkgs/* beyond haproxy's source fetch, rootfs/assemble.sh, image/*) is
-# still a stub - filled in phase by phase (see docs/architecture.md's
+# Phase 1 (kernel + shell-less init boots under QEMU) and Phase 2's static
+# HAProxy build are real as of the steps below - verified both locally and
+# by running this exact workflow. rootfs/assemble.sh and image/* (Phase 3)
+# are still stubs - filled in phase by phase (see docs/architecture.md's
 # roadmap) rather than added all at once.
 name: Image Build
 
@@ -33,8 +32,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Fetch pinned HAProxy source
-        run: docker build --build-arg HAPROXY_VERSION=$(grep '^HAPROXY_VERSION' versions.mk | cut -d= -f2 | xargs) pkgs/haproxy
+      # Static musl+OpenSSL haproxy binary (see pkgs/haproxy/Dockerfile) to
+      # build/haproxy.
+      - name: Build HAProxy
+        run: make haproxy-build
 
       # Builds bzImage from kernel/configs/haproxyos_defconfig (kernel/
       # Dockerfile's fetch -> config -> build -> export stages) and pulls
@@ -59,10 +60,44 @@ jobs:
       - name: Boot test under QEMU
         run: ./hack/qemu-run.sh build/bzImage build/initramfs.cpio.gz
 
-      # TODO(Phase 2): build pkgs/haproxy for real (static, musl - needs
-      # pkgs/musl-toolchain filled in first), wire up HAProxyService.
+      # Host-level integration test (not yet inside the QEMU-booted kernel
+      # - that needs network drivers Phase 1's config deliberately doesn't
+      # have; see docs/architecture.md): haproxyosd supervising the real
+      # static haproxy binary, driven entirely through the gRPC API,
+      # exactly as verified locally during Phase 2 development.
+      - name: Build control-plane binaries
+        run: make build
+
+      - name: HAProxy integration test
+        run: |
+          set -euo pipefail
+          # haproxyosd's own default paths (-haproxy-config/-pid/-stats-socket)
+          # ARE the real target layout - use them as-is rather than
+          # workspace-relative paths, since haproxy.cfg's "stats socket"
+          # line (rootfs/base/etc/haproxy/haproxy.cfg) hardcodes
+          # /run/haproxyos/haproxy-admin.sock and must match whatever
+          # haproxyosd is told to look for.
+          sudo mkdir -p /run/haproxyos /etc/haproxy
+          sudo cp rootfs/base/etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg
+          sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy
+
+          ./bin/haproxyosd -addr :19505 -haproxy-binary "$PWD/build/haproxy" \
+            & echo $! > /tmp/haproxyosd.pid
+          trap 'kill "$(cat /tmp/haproxyosd.pid)" 2>/dev/null || true; pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
+
+          sleep 2
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)"
+          if [ "$code" != "200" ]; then
+            echo "expected HTTP 200 from the bootstrap health frontend, got $code" >&2
+            exit 1
+          fi
+
+          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 haproxy show-info
+
       # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
       # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
-      # upload artifacts to a GitHub Release.
+      # upload artifacts to a GitHub Release. Also: get haproxy running
+      # *inside* the QEMU-booted kernel (needs network drivers + IP
+      # bring-up in rootfs/init, not just on the runner host).
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.
