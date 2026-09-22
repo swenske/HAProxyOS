@@ -12,6 +12,12 @@ HAProxyOS's own differentiating surface.
 Status column: ✅ implemented · ⬜ contract defined, returns
 `codes.Unimplemented` (see `internal/api`).
 
+**mTLS is mandatory on every connection** (`internal/pki`, wired up in
+`cmd/haproxyosd`) - there is no plaintext or unauthenticated mode. A
+node generates its own CA + server certificate + an initial admin client
+certificate on first boot; `GenerateClientConfiguration` issues
+additional client certificates once you already have one.
+
 ## SystemService
 
 | Method | Streaming | Status | Purpose |
@@ -44,7 +50,7 @@ Status column: ✅ implemented · ⬜ contract defined, returns
 | `Copy` | server | ⬜ | Tar stream of a path |
 | `PacketCapture` | server | ⬜ | tcpdump-equivalent over gRPC |
 | `MetaWrite` / `MetaDelete` | | ⬜ | META partition key/value entries |
-| `GenerateClientConfiguration` | | ⬜ | Issue a short-lived mTLS client cert (`internal/pki`) |
+| `GenerateClientConfiguration` | | ✅ | Issue an mTLS client cert (`internal/pki`) - 1 year validity, no rotation flow yet |
 
 ## LifecycleService
 

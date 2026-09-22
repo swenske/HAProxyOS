@@ -64,11 +64,21 @@ back automatically (`Rollback`) - no manual intervention needed.
 ## mTLS / PKI
 
 Every gRPC call is authenticated with a client certificate - there is no
-unauthenticated endpoint. The project maintains its own CA;
-`SystemService.GenerateClientConfiguration` issues short-lived, role-scoped
-client certificates (mirroring Talos's own bootstrap flow) rather than
-requiring certs to be provisioned out-of-band. `internal/pki` (Phase 2)
-owns this.
+unauthenticated endpoint (`internal/pki`, implemented in Phase 2). Each
+node maintains its own self-signed Ed25519 CA (10-year validity), and
+issues itself a server certificate for the gRPC listener. On first boot
+it also issues an initial admin client certificate and prints it once
+(there's no shell to retrieve it later) - the trust anchor a real
+deployment would instead hand out through `LifecycleService.Install`'s
+side channel (Phase 3, not built yet). `SystemService.
+GenerateClientConfiguration` issues further client certificates
+(currently 1 year validity, no renewal/rotation flow) once you already
+have one; roles are carried in the certificate's `Subject.Organization`
+field (the Kubernetes client-cert-auth idiom) but nothing enforces them
+yet - only `os:admin` exists, and every RPC an authenticated client
+reaches is currently allowed regardless of role. Authorization (role
+enforcement) is a gap to close before this is production-ready, not a
+Phase 3+ nice-to-have.
 
 ## SELinux and CIS hardening
 
@@ -138,8 +148,13 @@ plan - not implemented yet.
   instead of just proving the boot chain. Verified with `make
   qemu-network-test`: a host port forwarded to the guest's HAProxy
   actually answers real HTTP, both locally and via `image-build.yml` on
-  `haproxyos-runner01`. Still open: `internal/pki` (mTLS - the gRPC API
-  is still plaintext TCP), `Map*`/`ACLUpdate`/`Certificate*` RPCs,
+  `haproxyos-runner01`. mTLS is now mandatory on every connection (see
+  "mTLS / PKI" above) - `credentials.NewTLS` on the gRPC server, no
+  plaintext fallback, verified with a real mismatched-CA connection
+  attempt being rejected (unit test + manual check) and a fresh
+  `GenerateClientConfiguration`-issued cert authenticating successfully.
+  Still open: role **enforcement** (roles are carried on certs, nothing
+  checks them yet), `Map*`/`ACLUpdate`/`Certificate*` RPCs,
   restart-on-crash supervision (`rootfs/init` starts `haproxyosd` once
   and just reaps zombies forever - no restart if it crashes), and a
   dedicated `uid`/`chroot` directive in the bootstrap `haproxy.cfg`
