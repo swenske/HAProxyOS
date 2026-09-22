@@ -104,6 +104,20 @@ jobs:
             -ca /tmp/ci-client/ca.crt -cert /tmp/ci-client/client.crt -key /tmp/ci-client/client.key \
             version
 
+          # Role enforcement (internal/api/authz.go): an os:reader cert
+          # must be able to call a read-only RPC and must be rejected
+          # (PermissionDenied) on a mutating one - including trying to
+          # self-escalate via GenerateClientConfiguration.
+          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config -role os:reader /tmp/ci-reader
+          reader_flags=(-ca /tmp/ci-reader/ca.crt -cert /tmp/ci-reader/client.crt -key /tmp/ci-reader/client.key)
+          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy show-info
+
+          if ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy apply-config rootfs/base/etc/haproxy/haproxy.cfg 2>/tmp/reader-denied.log; then
+            echo "expected os:reader to be denied ApplyConfig, it succeeded" >&2
+            exit 1
+          fi
+          grep -q PermissionDenied /tmp/reader-denied.log || { echo "expected a PermissionDenied error, got:" >&2; cat /tmp/reader-denied.log >&2; exit 1; }
+
       # TODO(Phase 2 cont'd): internal/pki (mTLS), Map*/ACLUpdate/
       # Certificate* RPCs, restart-on-crash supervision in rootfs/init.
       # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +

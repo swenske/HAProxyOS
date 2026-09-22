@@ -45,11 +45,11 @@ func (s *System) GenerateClientConfiguration(_ context.Context, req *haproxyosv1
 		roles = []string{pki.RoleAdmin}
 	}
 	for _, role := range roles {
-		// pki.RoleAdmin is the only role that exists so far (see
-		// internal/pki's doc comment) - reject anything else rather than
-		// silently issuing a certificate whose role nothing can act on.
-		if role != pki.RoleAdmin {
-			return nil, status.Errorf(codes.InvalidArgument, "unknown role %q (only %q exists so far)", role, pki.RoleAdmin)
+		// Reject anything not in internal/pki's known role set rather
+		// than silently issuing a certificate whose role nothing checks
+		// for (see internal/api/authz.go's requiredRoles).
+		if role != pki.RoleAdmin && role != pki.RoleReader {
+			return nil, status.Errorf(codes.InvalidArgument, "unknown role %q (known roles: %q, %q)", role, pki.RoleAdmin, pki.RoleReader)
 		}
 	}
 

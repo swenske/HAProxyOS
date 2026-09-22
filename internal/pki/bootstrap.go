@@ -17,9 +17,14 @@ const (
 	adminCertFile  = "admin.crt"
 	adminKeyFile   = "admin.key"
 
-	// RoleAdmin is the only role that exists so far - see the package
-	// doc comment: nothing enforces it yet, it's just carried on the cert.
-	RoleAdmin = "os:admin"
+	// RoleAdmin can call every RPC. RoleReader can call observability/
+	// status RPCs only (see internal/api/authz.go for the exact split) -
+	// notably not the file/log/packet-capture RPCs, which are read-only
+	// in the sense of not mutating state but can expose sensitive data
+	// (private keys, secrets), so they're admin-only despite being
+	// "read" operations.
+	RoleAdmin  = "os:admin"
+	RoleReader = "os:reader"
 )
 
 // Bootstrap is the result of loading (or, on first boot, generating) a

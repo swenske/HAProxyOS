@@ -4,10 +4,13 @@
 // controller use instead of SSH.
 //
 // mTLS is mandatory on every connection (internal/pki) - there is no
-// plaintext or unauthenticated mode. On first boot (empty -pki-dir) a
-// CA, this node's server certificate, and an initial admin client
-// certificate are generated and the admin certificate/key are printed
-// once, since there's no shell to retrieve them from later (see
+// plaintext or unauthenticated mode - and every RPC is role-checked
+// against the calling certificate's roles (internal/api's
+// UnaryAuthInterceptor/StreamAuthInterceptor, see internal/api/authz.go
+// for the actual os:admin/os:reader split). On first boot (empty
+// -pki-dir) a CA, this node's server certificate, and an initial admin
+// client certificate are generated and the admin certificate/key are
+// printed once, since there's no shell to retrieve them from later (see
 // docs/architecture.md's "no shell" design goal) - copy them somewhere
 // safe immediately. Phase 3's Install flow will replace this with a
 // proper side channel.
@@ -89,7 +92,11 @@ func main() {
 	}
 
 	tlsConfig := pkiBootstrap.CA.ServerTLSConfig(pkiBootstrap.ServerCert)
-	srv := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
+	srv := grpc.NewServer(
+		grpc.Creds(credentials.NewTLS(tlsConfig)),
+		grpc.UnaryInterceptor(api.UnaryAuthInterceptor),
+		grpc.StreamInterceptor(api.StreamAuthInterceptor),
+	)
 	haproxyosv1alpha1.RegisterSystemServiceServer(srv, &api.System{BuildVersion: version, CA: pkiBootstrap.CA})
 	haproxyosv1alpha1.RegisterLifecycleServiceServer(srv, &api.Lifecycle{})
 	haproxyosv1alpha1.RegisterHAProxyServiceServer(srv, &api.HAProxy{Manager: haproxyMgr})

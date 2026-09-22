@@ -96,7 +96,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy stats              raw 'show stat' CSV from the stats socket")
 	fmt.Fprintln(os.Stderr, "  haproxy get-config         print the currently active haproxy.cfg")
 	fmt.Fprintln(os.Stderr, "  haproxy apply-config FILE  validate + apply + seamlessly reload with FILE's contents")
-	fmt.Fprintln(os.Stderr, "  pki generate-client-config DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
+	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
 }
 
 func ctx() (context.Context, context.CancelFunc) {
@@ -124,18 +124,23 @@ func runPKI(conn *grpc.ClientConn, args []string) {
 
 	switch sub := args[0]; sub {
 	case "generate-client-config":
-		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl pki generate-client-config DIR")
+		fs := flag.NewFlagSet("pki generate-client-config", flag.ExitOnError)
+		role := fs.String("role", "os:admin", "role to request (os:admin or os:reader - see internal/api/authz.go)")
+		_ = fs.Parse(args[1:])
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl pki generate-client-config [-role os:admin|os:reader] DIR")
 			os.Exit(2)
 		}
-		dir := args[1]
+		dir := fs.Arg(0)
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			log.Fatalf("mkdir %s: %v", dir, err)
 		}
 
 		c, cancel := ctx()
 		defer cancel()
-		resp, err := haproxyosv1alpha1.NewSystemServiceClient(conn).GenerateClientConfiguration(c, &haproxyosv1alpha1.GenerateClientConfigurationRequest{})
+		resp, err := haproxyosv1alpha1.NewSystemServiceClient(conn).GenerateClientConfiguration(c, &haproxyosv1alpha1.GenerateClientConfigurationRequest{
+			Roles: []string{*role},
+		})
 		if err != nil {
 			log.Fatalf("GenerateClientConfiguration: %v", err)
 		}

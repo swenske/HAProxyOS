@@ -74,11 +74,27 @@ side channel (Phase 3, not built yet). `SystemService.
 GenerateClientConfiguration` issues further client certificates
 (currently 1 year validity, no renewal/rotation flow) once you already
 have one; roles are carried in the certificate's `Subject.Organization`
-field (the Kubernetes client-cert-auth idiom) but nothing enforces them
-yet - only `os:admin` exists, and every RPC an authenticated client
-reaches is currently allowed regardless of role. Authorization (role
-enforcement) is a gap to close before this is production-ready, not a
-Phase 3+ nice-to-have.
+field (the Kubernetes client-cert-auth idiom).
+
+Roles are enforced, not just carried: `internal/api/authz.go`'s
+`UnaryAuthInterceptor`/`StreamAuthInterceptor` check every single RPC
+(both services are wired via `grpc.UnaryInterceptor`/
+`grpc.StreamInterceptor` in `cmd/haproxyosd`) against a static
+method -> required-roles table. Two roles exist: `os:admin` (everything)
+and `os:reader` (observability/status RPCs only - explicitly *not*
+`List`/`Read`/`Copy`/`Dmesg`/`Logs`/`DiskUsage`/`PacketCapture`, which
+don't mutate anything but can expose sensitive file contents or traffic,
+nor `GenerateClientConfiguration` itself, since issuing credentials is
+its own privileged operation - an `os:reader` cannot mint itself an
+`os:admin` cert). The table is fail-closed: an RPC with no entry
+defaults to admin-only, and a test (`internal/api/authz_test.go`)
+registers every service against a real `*grpc.Server` and cross-checks
+its actual method list against the table in both directions, so a new
+RPC that forgets an entry is caught immediately rather than silently
+defaulting open. Verified for real too: an `os:reader` certificate can
+call `HAProxyService.ShowInfo` but gets `PermissionDenied` calling
+`ApplyConfig` or trying to self-escalate via
+`GenerateClientConfiguration`.
 
 ## SELinux and CIS hardening
 
@@ -153,9 +169,10 @@ plan - not implemented yet.
   plaintext fallback, verified with a real mismatched-CA connection
   attempt being rejected (unit test + manual check) and a fresh
   `GenerateClientConfiguration`-issued cert authenticating successfully.
-  Still open: role **enforcement** (roles are carried on certs, nothing
-  checks them yet), `Map*`/`ACLUpdate`/`Certificate*` RPCs,
-  restart-on-crash supervision (`rootfs/init` starts `haproxyosd` once
+  Role enforcement (`os:admin`/`os:reader`) is implemented and verified
+  too - see "mTLS / PKI" above. Still open: `Map*`/`ACLUpdate`/
+  `Certificate*` RPCs, restart-on-crash supervision (`rootfs/init` starts
+  `haproxyosd` once
   and just reaps zombies forever - no restart if it crashes), and a
   dedicated `uid`/`chroot` directive in the bootstrap `haproxy.cfg`
   (HAProxy currently logs its own "started as root without chroot"

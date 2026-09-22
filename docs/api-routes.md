@@ -18,6 +18,15 @@ node generates its own CA + server certificate + an initial admin client
 certificate on first boot; `GenerateClientConfiguration` issues
 additional client certificates once you already have one.
 
+**Every RPC is also role-checked** against the caller's certificate
+(`internal/api/authz.go`, fail-closed - an RPC with no explicit entry
+defaults to admin-only). Two roles: `os:admin` (everything) and
+`os:reader` (the ✅ methods marked "read-only" in the tables below, plus
+`Version`/`Hostname`/`Events`/`GetConfig`/`ValidateConfig`/`*Status`/
+`*List`/`*Get` - status and observability RPCs only, not file/log/
+packet-capture access or credential issuance, even though some of those
+are also technically non-mutating).
+
 ## SystemService
 
 | Method | Streaming | Status | Purpose |
