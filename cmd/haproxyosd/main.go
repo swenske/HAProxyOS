@@ -14,6 +14,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 
 	"google.golang.org/grpc"
 
@@ -43,6 +44,14 @@ func main() {
 	lis, err := net.Listen("tcp", *addr)
 	if err != nil {
 		log.Fatalf("listen on %s: %v", *addr, err)
+	}
+
+	// haproxy needs its pid-file/stats-socket directory (and this
+	// daemon's own runtime dir in general) to exist - the target OS has
+	// no package manager / installer to have created it ahead of time,
+	// so this is the one place that responsibility can live.
+	if err := os.MkdirAll(filepath.Dir(*haproxyPid), 0o755); err != nil {
+		log.Fatalf("mkdir %s: %v", filepath.Dir(*haproxyPid), err)
 	}
 
 	haproxyMgr := haproxy.NewManager(*haproxyBin, *haproxyCfg, *haproxyPid, *haproxySock)

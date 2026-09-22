@@ -130,12 +130,27 @@ plan - not implemented yet.
   (`rootfs/assemble.sh` still a stub) isn't needed yet either, since the
   initramfs *is* the whole rootfs for this boot-proof milestone.
 - **Phase 2** (in progress): HAProxy integration (static musl build,
-  supervised by `haproxyosd`), `HAProxyService` fully implemented, mTLS/PKI
-  (`internal/pki`). HAProxy's own metrics keep using its **built-in**
-  Prometheus exporter (`internal/haproxy` just proxies the runtime
-  socket/config, it doesn't reimplement metrics export) - `internal/
-  exporter` (HAProxyOS's own, system-level, built on top of the gRPC API)
-  is explicitly **deferred past Phase 2**, not part of this phase.
+  supervised by `haproxyosd`), `HAProxyService`'s core RPCs implemented
+  and reachable **inside the QEMU-booted kernel itself** - the kernel
+  config grew real networking (virtio-net, `CONFIG_UNIX`/`INET`, DHCP via
+  kernel-builtin `IP_PNP` - no userspace network tooling needed), and
+  `rootfs/init` now supervises `haproxyosd` (which supervises `haproxy`)
+  instead of just proving the boot chain. Verified with `make
+  qemu-network-test`: a host port forwarded to the guest's HAProxy
+  actually answers real HTTP, both locally and via `image-build.yml` on
+  `haproxyos-runner01`. Still open: `internal/pki` (mTLS - the gRPC API
+  is still plaintext TCP), `Map*`/`ACLUpdate`/`Certificate*` RPCs,
+  restart-on-crash supervision (`rootfs/init` starts `haproxyosd` once
+  and just reaps zombies forever - no restart if it crashes), and a
+  dedicated `uid`/`chroot` directive in the bootstrap `haproxy.cfg`
+  (HAProxy currently logs its own "started as root without chroot"
+  warning - real privilege-drop work belongs in Phase 4's CIS hardening
+  pass, but this specific fix is small enough to consider sooner).
+  HAProxy's own metrics keep using its **built-in** Prometheus exporter
+  (`internal/haproxy` just proxies the runtime socket/config, it doesn't
+  reimplement metrics export) - `internal/exporter` (HAProxyOS's own,
+  system-level, built on top of the gRPC API) is explicitly **deferred
+  past Phase 2**, not part of this phase.
 - **Phase 3**: real immutability - A/B, dm-verity, UKI, Secure Boot,
   `LifecycleService.Install`/`Upgrade`/`Rollback`.
 - **Phase 4**: SELinux policy + full CIS hardening pass.

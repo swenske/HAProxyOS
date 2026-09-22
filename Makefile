@@ -11,7 +11,8 @@ BUILD_DIR := build
 GEN_DIR := gen
 
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
-	kernel-build init initramfs qemu-boot-test haproxy-build
+	kernel-build init initramfs qemu-boot-test haproxy-build \
+	daemon-static initramfs-full qemu-network-test
 
 all: build
 
@@ -93,3 +94,29 @@ haproxy-build:
 	mkdir -p $(BUILD_DIR)
 	docker build --target export --build-arg HAPROXY_VERSION=$(HAPROXY_VERSION) \
 		-o $(BUILD_DIR) pkgs/haproxy
+
+# Builds haproxyosd as a static binary (CGO_ENABLED=0, same reasoning as
+# `init`) for packaging into the initramfs - separate from `build`'s
+# bin/haproxyosd, which doesn't force CGO off since it only needs to run
+# on the build host there, not on the target kernel.
+daemon-static:
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" \
+		-o $(BUILD_DIR)/haproxyosd ./cmd/haproxyosd
+
+# The Phase 2 network-integration rootfs: init + haproxyosd + the real
+# static haproxy binary + the bootstrap config (see rootfs/base/etc/
+# haproxy/haproxy.cfg). rootfs/init detects haproxyosd's presence and
+# supervises it instead of powering off - see rootfs/init/main.go.
+initramfs-full: init daemon-static haproxy-build
+	./hack/build-initramfs.sh $(BUILD_DIR)/init $(BUILD_DIR)/initramfs-full.cpio.gz \
+		$(BUILD_DIR)/haproxyosd:sbin/haproxyosd \
+		$(BUILD_DIR)/haproxy:usr/local/sbin/haproxy \
+		rootfs/base/etc/haproxy/haproxy.cfg:etc/haproxy/haproxy.cfg
+
+# The Phase 2 network-integration boot test: boots the kernel + full
+# initramfs under QEMU with virtio-net + DHCP, and polls a forwarded host
+# port until HAProxy - running *inside* the VM - answers over real TCP/IP
+# (see hack/qemu-network-test.sh). Requires qemu-system-x86_64 on PATH.
+qemu-network-test: kernel-build initramfs-full
+	./hack/qemu-network-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs-full.cpio.gz
