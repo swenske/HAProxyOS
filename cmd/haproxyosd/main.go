@@ -45,6 +45,7 @@ func main() {
 	haproxyCfg := flag.String("haproxy-config", "/etc/haproxy/haproxy.cfg", "path to haproxy's active config file")
 	haproxyPid := flag.String("haproxy-pid", "/run/haproxyos/haproxy.pid", "path to haproxy's pid file")
 	haproxySock := flag.String("haproxy-stats-socket", "/run/haproxyos/haproxy-admin.sock", "path to haproxy's stats socket (must match the 'stats socket' line in haproxy-config)")
+	haproxyChrootDir := flag.String("haproxy-chroot-dir", "/var/empty", "directory haproxy chroots into after binding listeners and dropping privileges (must match the 'chroot' line in haproxy-config); created here since this rootfs has no package manager to have provisioned it")
 	flag.Parse()
 
 	if *showVersion {
@@ -77,6 +78,15 @@ func main() {
 	// so this is the one place that responsibility can live.
 	if err := os.MkdirAll(filepath.Dir(*haproxyPid), 0o755); err != nil {
 		log.Fatalf("mkdir %s: %v", filepath.Dir(*haproxyPid), err)
+	}
+
+	// The chroot jail haproxy.cfg's `chroot` directive points into.
+	// Nothing is ever accessed inside it after the chroot() call (every
+	// file haproxy needs - config, maps, ACLs, certs - is opened before
+	// it drops privileges), so it's created empty and inaccessible on
+	// purpose: mode 0000, not even readable by its own owner.
+	if err := os.MkdirAll(*haproxyChrootDir, 0o000); err != nil {
+		log.Fatalf("mkdir %s: %v", *haproxyChrootDir, err)
 	}
 
 	haproxyMgr := haproxy.NewManager(*haproxyBin, *haproxyCfg, *haproxyPid, *haproxySock)

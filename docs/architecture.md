@@ -155,7 +155,8 @@ plan - not implemented yet.
   Still open for Phase 1: real rootfs assembly beyond a single init binary
   (`rootfs/assemble.sh` still a stub) isn't needed yet either, since the
   initramfs *is* the whole rootfs for this boot-proof milestone.
-- **Phase 2** (in progress): HAProxy integration (static musl build,
+- **Phase 2** (essentially complete - one item left, see below): HAProxy
+  integration (static musl build,
   supervised by `haproxyosd`), `HAProxyService`'s core RPCs implemented
   and reachable **inside the QEMU-booted kernel itself** - the kernel
   config grew real networking (virtio-net, `CONFIG_UNIX`/`INET`, DHCP via
@@ -186,14 +187,47 @@ plan - not implemented yet.
   (`new`/`set`/`commit`/`del ssl cert`) - a freshly uploaded certificate
   is loaded and inspectable but reports "Unused" until a `bind ... ssl
   crt-list <list>` in the running config actually references it, which
-  `ApplyConfig` doesn't have first-class support for wiring up yet.
-  Still open: restart-on-crash supervision (`rootfs/init` starts
-  `haproxyosd` once and just reaps zombies forever - no restart if it
-  crashes), and a dedicated `uid`/`chroot` directive in the bootstrap
-  `haproxy.cfg` (HAProxy currently logs its own "started as root without
-  chroot" warning - real privilege-drop work belongs in Phase 4's CIS
-  hardening pass, but this specific fix is small enough to consider
-  sooner).
+  `ApplyConfig` doesn't have first-class support for wiring up yet -
+  the one item Phase 2 still leaves open (see the roadmap note above).
+
+  The other two gaps this phase had are closed:
+
+  **Restart-on-crash.** `rootfs/init` no longer just reaps zombies
+  forever - `rootfs/init/supervisor.go`'s `Supervisor` restarts
+  `haproxyosd` every time it exits, with a backoff that grows (capped at
+  30s) on fast repeated crashes and resets to the 1s minimum once an
+  instance has stayed up 60s (so one old crash loop doesn't leave a
+  later, unrelated crash waiting the full backoff to recover). There's
+  deliberately **no give-up threshold** - `haproxyosd` is the only way to
+  reach a node at all (see "no shell" above), so stopping restarts after
+  N failures - systemd's default - would leave the node permanently
+  unmanageable with no fallback the way SSH would be for a normal box.
+  All child-reaping happens through a single shared `wait4(-1, ...)`
+  loop, matching the pattern (never call `exec.Cmd.Wait()` when a
+  supervisor loop also reaps children directly) `internal/haproxy.
+  Manager` already relied on for `haproxy`'s own `-sf` reload; a second,
+  independent reap loop would race the first to collect the same pid.
+  Verified with real subprocesses, not mocks
+  (`rootfs/init/supervisor_test.go`): three consecutive crashes produce
+  three distinct new pids, the backoff sequence is exactly right for a
+  fast crash loop and resets correctly after a stable run, an unrelated
+  decoy child exiting is never mistaken for the supervised process, and
+  a process that fails to even start doesn't hang the loop.
+
+  **HAProxy privilege drop.** The bootstrap `haproxy.cfg` now sets
+  `chroot /var/empty` + numeric `uid 1000`/`gid 1000` (no `/etc/passwd`
+  on this rootfs to resolve named `user`/`group` against, and HAProxy
+  doesn't need one for numeric ids). `haproxyosd` creates `/var/empty`
+  itself (`-haproxy-chroot-dir`, mode `0000` - genuinely empty and
+  inaccessible, since nothing is ever opened from inside it: every file
+  HAProxy touches - config, maps, ACLs, certs, the stats socket bind - is
+  opened before it chroots and drops privileges). HAProxy's own "started
+  as root without chroot" warning is gone. Verified end-to-end with
+  privilege dropping actually active, not just config-parses-cleanly:
+  confirmed the live `haproxy` process's real UID/GID (`ps`), and reran
+  the full ApplyConfig/map/ACL/cert test sequence against it to confirm
+  none of that broke under chroot + dropped privileges - it doesn't,
+  since all the file access those need happens pre-chroot.
   HAProxy's own metrics keep using its **built-in** Prometheus exporter
   (`internal/haproxy` just proxies the runtime socket/config, it doesn't
   reimplement metrics export) - `internal/exporter` (HAProxyOS's own,

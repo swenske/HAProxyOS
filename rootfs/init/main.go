@@ -1,8 +1,13 @@
 // Command init is HAProxyOS's PID 1. It mounts proc/sysfs/devtmpfs,
 // prints a fixed success marker that hack/qemu-run.sh greps for, then:
-//   - if /sbin/haproxyosd is present in the initramfs, starts it as a
-//     supervised child (the real Phase 2 shape: init -> haproxyosd ->
-//     haproxy) and reaps zombies forever - the machine stays up.
+//   - if /sbin/haproxyosd is present in the initramfs, starts it under a
+//     Supervisor (see supervisor.go) that restarts it - with a growing,
+//     capped backoff - every time it exits, forever. There's no give-up
+//     threshold: haproxyosd is the only way to reach the node at all
+//     (see docs/architecture.md's "no shell" design), so a node that
+//     stops retrying after N crashes would be permanently unmanageable
+//     with no fallback - unlike systemd's default, which can still fall
+//     back to SSH.
 //   - otherwise, powers off cleanly after a short delay - the Phase 1
 //     boot-proof shape, so `make qemu-boot-test` (init alone, no
 //     haproxyosd packaged in) keeps working unchanged.
@@ -11,7 +16,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"syscall"
 	"time"
 )
@@ -52,41 +56,22 @@ func main() {
 	powerOff()
 }
 
-// startDaemon launches haproxyosd (which starts/supervises haproxy - see
-// internal/haproxy.Manager) and never returns: PID 1 spends the rest of
-// its life reaping zombies. There's no restart-on-crash logic yet - a
-// crashed haproxyosd just leaves the machine without a control plane
-// until Phase 3's supervision story lands.
 func startDaemon() {
 	if err := os.MkdirAll("/run/haproxyos", 0o755); err != nil {
 		fmt.Printf("init: mkdir /run/haproxyos: %v\n", err)
 	}
 
-	cmd := exec.Command(daemonPath, "-addr", ":9505")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		fmt.Printf("init: start %s: %v\n", daemonPath, err)
-		fmt.Println("HAPROXYOS_INIT_BOOT_OK")
-		time.Sleep(2 * time.Second)
-		powerOff()
-		return
-	}
-
 	fmt.Println("HAPROXYOS_INIT_BOOT_OK")
-	reapForever()
-}
 
-// reapForever waits for any child (haproxyosd, or anything it or haproxy
-// leaves behind) to exit, forever - the minimum a process running as
-// PID 1 owes the kernel, or exited children pile up as zombies.
-func reapForever() {
-	for {
-		var ws syscall.WaitStatus
-		if _, err := syscall.Wait4(-1, &ws, 0, nil); err != nil {
-			time.Sleep(time.Second)
-		}
-	}
+	(&Supervisor{
+		Path:        daemonPath,
+		Args:        []string{"-addr", ":9505"},
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+		MinBackoff:  1 * time.Second,
+		MaxBackoff:  30 * time.Second,
+		StableAfter: 60 * time.Second,
+	}).Run()
 }
 
 func powerOff() {
