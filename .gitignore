@@ -1,6 +1,5 @@
 # Go build output
 /bin/
-/gen/
 
 # Local-only Claude Code context and tool config - never published.
 /CLAUDE.md
