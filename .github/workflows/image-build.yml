@@ -77,11 +77,17 @@ jobs:
           # haproxyosd is told to look for.
           sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
           sudo cp rootfs/base/etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg
-          sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy /etc/haproxyos
+          # chroot /var/empty is in that config now - the chroot() syscall
+          # needs real root (CAP_SYS_CHROOT), so haproxyosd (and therefore
+          # haproxy, its child) runs under sudo here, matching how PID 1
+          # (rootfs/init, itself root) actually starts it on the real
+          # target OS. haproxyosctl needs sudo too, purely to read the
+          # root-owned PKI files haproxyosd bootstraps.
+          sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
 
-          ./bin/haproxyosd -addr :19505 -haproxy-binary "$PWD/build/haproxy" \
+          sudo ./bin/haproxyosd -addr :19505 -haproxy-binary "$PWD/build/haproxy" \
             & echo $! > /tmp/haproxyosd.pid
-          trap 'kill "$(cat /tmp/haproxyosd.pid)" 2>/dev/null || true; pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
+          trap 'sudo kill "$(cat /tmp/haproxyosd.pid)" 2>/dev/null || true; sudo pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
 
           sleep 2
           code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)"
@@ -94,13 +100,13 @@ jobs:
           # /etc/haproxyos/pki (see internal/pki) - haproxyosctl's own
           # defaults already point there, matching a real node where ctl
           # and daemon share a filesystem.
-          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 haproxy show-info
+          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 haproxy show-info
 
           # Exercise GenerateClientConfiguration for real: issue a second
           # client certificate over the mTLS-authenticated connection and
           # confirm it authenticates on its own.
-          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config /tmp/ci-client
-          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 \
+          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config /tmp/ci-client
+          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 \
             -ca /tmp/ci-client/ca.crt -cert /tmp/ci-client/client.crt -key /tmp/ci-client/client.key \
             version
 
@@ -108,11 +114,11 @@ jobs:
           # must be able to call a read-only RPC and must be rejected
           # (PermissionDenied) on a mutating one - including trying to
           # self-escalate via GenerateClientConfiguration.
-          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config -role os:reader /tmp/ci-reader
+          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config -role os:reader /tmp/ci-reader
           reader_flags=(-ca /tmp/ci-reader/ca.crt -cert /tmp/ci-reader/client.crt -key /tmp/ci-reader/client.key)
-          ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy show-info
+          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy show-info
 
-          if ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy apply-config rootfs/base/etc/haproxy/haproxy.cfg 2>/tmp/reader-denied.log; then
+          if sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy apply-config rootfs/base/etc/haproxy/haproxy.cfg 2>/tmp/reader-denied.log; then
             echo "expected os:reader to be denied ApplyConfig, it succeeded" >&2
             exit 1
           fi
@@ -150,6 +156,7 @@ jobs:
 
           sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
           sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy /etc/haproxyos
+          sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
 
           # haproxyosd starts haproxy with this exact config at boot
           # (-haproxy-config) - no need to re-apply it over the API
@@ -183,10 +190,10 @@ jobs:
           ctl haproxy cert-list | grep -q "^/tmp/rt-uploaded.pem"
           ctl haproxy cert-delete /tmp/rt-uploaded.pem
 
-      # TODO(Phase 2 cont'd): restart-on-crash supervision in rootfs/init
-      # (haproxyosd is started once and never restarted if it crashes),
-      # binding an uploaded certificate to a live listener via crt-list
-      # support in ApplyConfig.
+      # TODO(Phase 2 cont'd): binding an uploaded certificate to a live
+      # listener via crt-list support in ApplyConfig - the last Phase 2
+      # item still open (restart-on-crash and chroot/uid privilege drop
+      # are both done, see docs/architecture.md).
       # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
       # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
       # upload artifacts to a GitHub Release.
