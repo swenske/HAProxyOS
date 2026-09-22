@@ -170,14 +170,30 @@ plan - not implemented yet.
   attempt being rejected (unit test + manual check) and a fresh
   `GenerateClientConfiguration`-issued cert authenticating successfully.
   Role enforcement (`os:admin`/`os:reader`) is implemented and verified
-  too - see "mTLS / PKI" above. Still open: `Map*`/`ACLUpdate`/
-  `Certificate*` RPCs, restart-on-crash supervision (`rootfs/init` starts
-  `haproxyosd` once
-  and just reaps zombies forever - no restart if it crashes), and a
-  dedicated `uid`/`chroot` directive in the bootstrap `haproxy.cfg`
-  (HAProxy currently logs its own "started as root without chroot"
-  warning - real privilege-drop work belongs in Phase 4's CIS hardening
-  pass, but this specific fix is small enough to consider sooner).
+  too - see "mTLS / PKI" above.
+  `HAProxyService`'s runtime map/ACL/certificate RPCs are also
+  implemented now, against real, empirically-verified HAProxy runtime API
+  behavior rather than assumed syntax (probed a live instance's `help`
+  output and tested each command directly before writing the Go code -
+  see `internal/haproxy/runtime_maps.go`/`runtime_certs.go`). Two things
+  worth remembering if you touch this: `MapList`/`ACLUpdate` only see
+  *file-backed* maps/ACLs (`map(<path>)`/`acl ... -f <path>` in the
+  running config - inline ones aren't addressable via the runtime API at
+  all), and HAProxy's `set map` does **not** upsert - it errors on a
+  missing key - so `MapUpdate`/`ACLUpdate`'s "set" path is really
+  delete-then-add. `CertificateUpload`/`CertificateList`/
+  `CertificateDelete` manage HAProxy's in-memory certificate *store*
+  (`new`/`set`/`commit`/`del ssl cert`) - a freshly uploaded certificate
+  is loaded and inspectable but reports "Unused" until a `bind ... ssl
+  crt-list <list>` in the running config actually references it, which
+  `ApplyConfig` doesn't have first-class support for wiring up yet.
+  Still open: restart-on-crash supervision (`rootfs/init` starts
+  `haproxyosd` once and just reaps zombies forever - no restart if it
+  crashes), and a dedicated `uid`/`chroot` directive in the bootstrap
+  `haproxy.cfg` (HAProxy currently logs its own "started as root without
+  chroot" warning - real privilege-drop work belongs in Phase 4's CIS
+  hardening pass, but this specific fix is small enough to consider
+  sooner).
   HAProxy's own metrics keep using its **built-in** Prometheus exporter
   (`internal/haproxy` just proxies the runtime socket/config, it doesn't
   reimplement metrics export) - `internal/exporter` (HAProxyOS's own,

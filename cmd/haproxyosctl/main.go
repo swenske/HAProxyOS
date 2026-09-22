@@ -96,6 +96,15 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy stats              raw 'show stat' CSV from the stats socket")
 	fmt.Fprintln(os.Stderr, "  haproxy get-config         print the currently active haproxy.cfg")
 	fmt.Fprintln(os.Stderr, "  haproxy apply-config FILE  validate + apply + seamlessly reload with FILE's contents")
+	fmt.Fprintln(os.Stderr, "  haproxy map-list                  list file-backed maps known to the running config")
+	fmt.Fprintln(os.Stderr, "  haproxy map-get MAP                dump MAP's key/value entries")
+	fmt.Fprintln(os.Stderr, "  haproxy map-set MAP KEY VALUE      upsert one entry in MAP")
+	fmt.Fprintln(os.Stderr, "  haproxy map-delete MAP KEY          delete one entry from MAP")
+	fmt.Fprintln(os.Stderr, "  haproxy acl-add ACL VALUE           add one pattern value to ACL")
+	fmt.Fprintln(os.Stderr, "  haproxy acl-delete ACL VALUE        delete one pattern value from ACL")
+	fmt.Fprintln(os.Stderr, "  haproxy cert-list                   list certificates in HAProxy's cert store")
+	fmt.Fprintln(os.Stderr, "  haproxy cert-upload NAME FILE       upload/update a PEM cert+key bundle as NAME")
+	fmt.Fprintln(os.Stderr, "  haproxy cert-delete NAME             delete an unused certificate")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
 }
 
@@ -230,6 +239,119 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 		}
 		if last != nil && !last.GetAccepted() {
 			os.Exit(1)
+		}
+
+	case "map-list":
+		c, cancel := ctx()
+		defer cancel()
+		resp, err := client.MapList(c, &emptypb.Empty{})
+		if err != nil {
+			log.Fatalf("MapList: %v", err)
+		}
+		for _, name := range resp.GetMaps() {
+			fmt.Println(name)
+		}
+
+	case "map-get":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-get MAP")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		resp, err := client.MapGet(c, &haproxyosv1alpha1.MapGetRequest{Map: args[1]})
+		if err != nil {
+			log.Fatalf("MapGet: %v", err)
+		}
+		for k, v := range resp.GetEntries() {
+			fmt.Printf("%s %s\n", k, v)
+		}
+
+	case "map-set":
+		if len(args) != 4 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-set MAP KEY VALUE")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err := client.MapUpdate(c, &haproxyosv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Value: args[3]})
+		if err != nil {
+			log.Fatalf("MapUpdate: %v", err)
+		}
+
+	case "map-delete":
+		if len(args) != 3 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-delete MAP KEY")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err := client.MapUpdate(c, &haproxyosv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Delete: true})
+		if err != nil {
+			log.Fatalf("MapUpdate: %v", err)
+		}
+
+	case "acl-add":
+		if len(args) != 3 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy acl-add ACL VALUE")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err := client.ACLUpdate(c, &haproxyosv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2]})
+		if err != nil {
+			log.Fatalf("ACLUpdate: %v", err)
+		}
+
+	case "acl-delete":
+		if len(args) != 3 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy acl-delete ACL VALUE")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err := client.ACLUpdate(c, &haproxyosv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2], Delete: true})
+		if err != nil {
+			log.Fatalf("ACLUpdate: %v", err)
+		}
+
+	case "cert-list":
+		c, cancel := ctx()
+		defer cancel()
+		resp, err := client.CertificateList(c, &emptypb.Empty{})
+		if err != nil {
+			log.Fatalf("CertificateList: %v", err)
+		}
+		for _, cert := range resp.GetCertificates() {
+			fmt.Printf("%s\tnotAfter=%s\n", cert.GetName(), cert.GetNotAfter())
+		}
+
+	case "cert-upload":
+		if len(args) != 3 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-upload NAME FILE")
+			os.Exit(2)
+		}
+		data, err := os.ReadFile(args[2])
+		if err != nil {
+			log.Fatalf("read %s: %v", args[2], err)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err = client.CertificateUpload(c, &haproxyosv1alpha1.CertificateUploadRequest{Name: args[1], PemBundle: data})
+		if err != nil {
+			log.Fatalf("CertificateUpload: %v", err)
+		}
+
+	case "cert-delete":
+		if len(args) != 2 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-delete NAME")
+			os.Exit(2)
+		}
+		c, cancel := ctx()
+		defer cancel()
+		_, err := client.CertificateDelete(c, &haproxyosv1alpha1.CertificateDeleteRequest{Name: args[1]})
+		if err != nil {
+			log.Fatalf("CertificateDelete: %v", err)
 		}
 
 	default:

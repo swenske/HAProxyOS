@@ -11,9 +11,8 @@ import (
 )
 
 // HAProxy implements haproxyosv1alpha1.HAProxyServiceServer, backed by a
-// single supervised haproxy process (internal/haproxy.Manager). Runtime
-// map/ACL/certificate management (MapList/MapGet/MapUpdate/ACLUpdate/
-// Certificate*) isn't implemented yet - falls through to
+// single supervised haproxy process (internal/haproxy.Manager).
+// BackendList isn't implemented yet - falls through to
 // UnimplementedHAProxyServiceServer.
 type HAProxy struct {
 	haproxyosv1alpha1.UnimplementedHAProxyServiceServer
@@ -90,6 +89,62 @@ func (h *HAProxy) ServerSetState(_ context.Context, req *haproxyosv1alpha1.Serve
 	}[req.GetState()]
 
 	if err := h.Manager.SetServerState(req.GetBackend(), req.GetServer(), state); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *HAProxy) MapList(_ context.Context, _ *emptypb.Empty) (*haproxyosv1alpha1.MapListResponse, error) {
+	maps, err := h.Manager.MapList()
+	if err != nil {
+		return nil, err
+	}
+	return &haproxyosv1alpha1.MapListResponse{Maps: maps}, nil
+}
+
+func (h *HAProxy) MapGet(_ context.Context, req *haproxyosv1alpha1.MapGetRequest) (*haproxyosv1alpha1.MapGetResponse, error) {
+	entries, err := h.Manager.MapGet(req.GetMap())
+	if err != nil {
+		return nil, err
+	}
+	return &haproxyosv1alpha1.MapGetResponse{Entries: entries}, nil
+}
+
+func (h *HAProxy) MapUpdate(_ context.Context, req *haproxyosv1alpha1.MapUpdateRequest) (*emptypb.Empty, error) {
+	if err := h.Manager.MapUpdate(req.GetMap(), req.GetKey(), req.GetValue(), req.GetDelete()); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *HAProxy) ACLUpdate(_ context.Context, req *haproxyosv1alpha1.ACLUpdateRequest) (*emptypb.Empty, error) {
+	if err := h.Manager.ACLUpdate(req.GetAcl(), req.GetValue(), req.GetDelete()); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *HAProxy) CertificateList(_ context.Context, _ *emptypb.Empty) (*haproxyosv1alpha1.CertificateListResponse, error) {
+	certs, err := h.Manager.CertificateList()
+	if err != nil {
+		return nil, err
+	}
+	resp := &haproxyosv1alpha1.CertificateListResponse{}
+	for _, c := range certs {
+		resp.Certificates = append(resp.Certificates, &haproxyosv1alpha1.CertificateInfo{Name: c.Name, NotAfter: c.NotAfter})
+	}
+	return resp, nil
+}
+
+func (h *HAProxy) CertificateUpload(_ context.Context, req *haproxyosv1alpha1.CertificateUploadRequest) (*emptypb.Empty, error) {
+	if err := h.Manager.CertificateUpload(req.GetName(), req.GetPemBundle()); err != nil {
+		return nil, err
+	}
+	return &emptypb.Empty{}, nil
+}
+
+func (h *HAProxy) CertificateDelete(_ context.Context, req *haproxyosv1alpha1.CertificateDeleteRequest) (*emptypb.Empty, error) {
+	if err := h.Manager.CertificateDelete(req.GetName()); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil

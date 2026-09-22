@@ -118,8 +118,75 @@ jobs:
           fi
           grep -q PermissionDenied /tmp/reader-denied.log || { echo "expected a PermissionDenied error, got:" >&2; cat /tmp/reader-denied.log >&2; exit 1; }
 
-      # TODO(Phase 2 cont'd): internal/pki (mTLS), Map*/ACLUpdate/
-      # Certificate* RPCs, restart-on-crash supervision in rootfs/init.
+      # internal/haproxy/runtime_maps.go and runtime_certs.go: exercised
+      # against real file-backed map/ACL entries and a real uploaded
+      # certificate, not just unit-tested against captured fixtures (see
+      # internal/haproxy/runtime_maps_test.go / runtime_certs_test.go for
+      # those). A previous haproxyosd instance's config didn't declare any
+      # maps/ACLs (rootfs/base/etc/haproxy/haproxy.cfg is deliberately
+      # minimal) - MapList/ACLUpdate only ever see *file-backed*
+      # maps/ACLs, so this step applies its own config with one of each.
+      - name: HAProxy runtime map/ACL/certificate test
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rt-maps /tmp/rt-acls
+          echo "www.example.com backend1" > /tmp/rt-maps/hosts.map
+          echo "1.2.3.4" > /tmp/rt-acls/blocked.acl
+          cat > /tmp/rt-haproxy.cfg <<'EOF'
+          global
+              stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
+          defaults
+              mode http
+              timeout connect 5s
+              timeout client 30s
+              timeout server 30s
+          frontend haproxyos-health
+              bind *:8080
+              acl blocked src -f /tmp/rt-acls/blocked.acl
+              http-request deny if blocked
+              http-request set-header X-Mapped %[req.hdr(host),map(/tmp/rt-maps/hosts.map,default)]
+              http-request return status 200 content-type text/plain string "up\n"
+          EOF
+
+          sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
+          sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy /etc/haproxyos
+
+          # haproxyosd starts haproxy with this exact config at boot
+          # (-haproxy-config) - no need to re-apply it over the API
+          # afterward. Doing so anyway raced the seamless reload against
+          # the runtime-API calls below and was caught here in a local
+          # dry run before it reached CI: some calls landed on the old,
+          # draining process instead of the new one, producing
+          # hard-to-explain failures ("No ongoing transaction!" on a
+          # commit whose "set" had just "succeeded") that had nothing to
+          # do with the map/ACL/cert code itself.
+          ./bin/haproxyosd -addr :19506 -haproxy-binary "$PWD/build/haproxy" \
+            -pki-dir /etc/haproxyos/pki-rt -haproxy-config /tmp/rt-haproxy.cfg \
+            & echo $! > /tmp/haproxyosd-rt.pid
+          trap 'kill "$(cat /tmp/haproxyosd-rt.pid)" 2>/dev/null || true; pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
+          sleep 2
+          ctl() { ./bin/haproxyosctl -endpoint 127.0.0.1:19506 -ca /etc/haproxyos/pki-rt/ca.crt \
+            -cert /etc/haproxyos/pki-rt/admin.crt -key /etc/haproxyos/pki-rt/admin.key "$@"; }
+
+          [ "$(ctl haproxy map-list)" = "/tmp/rt-maps/hosts.map" ]
+          ctl haproxy map-set /tmp/rt-maps/hosts.map www.new.com backendX
+          ctl haproxy map-get /tmp/rt-maps/hosts.map | grep -q "^www.new.com backendX$"
+          ctl haproxy map-delete /tmp/rt-maps/hosts.map www.new.com
+          ! ctl haproxy map-get /tmp/rt-maps/hosts.map | grep -q www.new.com
+
+          ctl haproxy acl-add /tmp/rt-acls/blocked.acl 5.6.7.8
+          ctl haproxy acl-delete /tmp/rt-acls/blocked.acl 5.6.7.8
+
+          openssl req -x509 -newkey ed25519 -keyout /tmp/rt-cert.key -out /tmp/rt-cert.crt -days 1 -nodes -subj "/CN=rt.example.com" 2>/dev/null
+          cat /tmp/rt-cert.crt /tmp/rt-cert.key > /tmp/rt-cert-bundle.pem
+          ctl haproxy cert-upload /tmp/rt-uploaded.pem /tmp/rt-cert-bundle.pem
+          ctl haproxy cert-list | grep -q "^/tmp/rt-uploaded.pem"
+          ctl haproxy cert-delete /tmp/rt-uploaded.pem
+
+      # TODO(Phase 2 cont'd): restart-on-crash supervision in rootfs/init
+      # (haproxyosd is started once and never restarted if it crashes),
+      # binding an uploaded certificate to a live listener via crt-list
+      # support in ApplyConfig.
       # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
       # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
       # upload artifacts to a GitHub Release.
