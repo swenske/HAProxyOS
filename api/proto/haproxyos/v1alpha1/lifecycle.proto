@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package haproxyos.v1alpha1;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+
+// LifecycleService handles installation, upgrade and rollback: writing a
+// new immutable image to the inactive A/B slot, switching the bootloader
+// to it, and rolling back automatically if the new slot doesn't become
+// healthy within its grace period. See docs/architecture.md for the A/B
+// partition layout this is built on (Phase 3).
+service LifecycleService {
+  // Install writes an image to disk for the first time (bare metal /
+  // fresh VM), streaming progress.
+  rpc Install(InstallRequest) returns (stream InstallResponse);
+
+  // Upgrade writes a new image to the currently-inactive A/B slot,
+  // switches the bootloader default, reboots, and - unless
+  // wait_for_health is false - watches the new slot's health and rolls
+  // back automatically if it doesn't report healthy in time.
+  rpc Upgrade(UpgradeRequest) returns (stream UpgradeResponse);
+
+  // Rollback switches the bootloader default back to the other A/B slot
+  // and reboots, without needing a new image.
+  rpc Rollback(google.protobuf.Empty) returns (RollbackResponse);
+}
+
+message ImageSource {
+  // OCI reference or HTTPS URL of the image to install/upgrade to,
+  // signed and verified against the project's release key before use.
+  string reference = 1;
+  string sha256 = 2;
+}
+
+message InstallRequest {
+  ImageSource source = 1;
+  // Target disk, e.g. "/dev/sda". Fails if the disk already has a
+  // HAProxyOS install (use Reset/Upgrade instead).
+  string disk = 2;
+}
+
+message InstallResponse {
+  string stage = 1;   // e.g. "partitioning", "writing-image", "verifying"
+  double progress = 2; // 0.0-1.0 within the current stage
+  string message = 3;
+}
+
+message UpgradeRequest {
+  ImageSource source = 1;
+  bool wait_for_health = 2;
+  uint32 health_timeout_seconds = 3;
+}
+
+message UpgradeResponse {
+  string stage = 1; // e.g. "writing", "verifying", "switching-slot", "rebooting", "health-check", "rolled-back"
+  double progress = 2;
+  string message = 3;
+}
+
+message RollbackResponse {
+  string active_slot = 1; // "A" or "B" after the switch
+}

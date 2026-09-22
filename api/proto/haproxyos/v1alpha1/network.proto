@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package haproxyos.v1alpha1;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+
+// NetworkService controls the optional network features (BGP via bird,
+// VRRP via keepalived, firewall via nftables). Each sub-service is a
+// well-defined no-op (see NOT_ENABLED below) when its module isn't turned
+// on in the node's declarative configuration, because the corresponding
+// binary is then simply absent from the immutable rootfs (see
+// docs/architecture.md and Phase 5 of the roadmap).
+service NetworkService {
+  rpc BGPStatus(google.protobuf.Empty) returns (BGPStatusResponse);
+  rpc BGPApplyConfig(BGPApplyConfigRequest) returns (BGPApplyConfigResponse);
+
+  rpc VRRPStatus(google.protobuf.Empty) returns (VRRPStatusResponse);
+  rpc VRRPApplyConfig(VRRPApplyConfigRequest) returns (VRRPApplyConfigResponse);
+
+  rpc FirewallList(google.protobuf.Empty) returns (FirewallListResponse);
+  rpc FirewallApplyRuleset(FirewallApplyRulesetRequest) returns (FirewallApplyRulesetResponse);
+}
+
+// ModuleState is shared by every optional module's status response so a
+// client can distinguish "not enabled on this node" from "enabled but
+// currently down".
+enum ModuleState {
+  MODULE_STATE_NOT_ENABLED = 0;
+  MODULE_STATE_RUNNING = 1;
+  MODULE_STATE_STOPPED = 2;
+  MODULE_STATE_ERROR = 3;
+}
+
+message BGPStatusResponse {
+  ModuleState state = 1;
+  repeated BGPPeer peers = 2;
+}
+
+message BGPPeer {
+  string address = 1;
+  string state = 2; // bird protocol state, e.g. "Established"
+  uint32 routes_received = 3;
+  uint32 routes_exported = 4;
+}
+
+message BGPApplyConfigRequest {
+  // bird.conf content, validated before apply.
+  bytes config = 1;
+}
+
+message BGPApplyConfigResponse {
+  bool accepted = 1;
+  repeated string errors = 2;
+}
+
+message VRRPStatusResponse {
+  ModuleState state = 1;
+  repeated VRRPInstance instances = 2;
+}
+
+message VRRPInstance {
+  string name = 1;
+  string role = 2; // "MASTER" or "BACKUP"
+  string virtual_ip = 3;
+}
+
+message VRRPApplyConfigRequest {
+  // keepalived.conf content, validated before apply.
+  bytes config = 1;
+}
+
+message VRRPApplyConfigResponse {
+  bool accepted = 1;
+  repeated string errors = 2;
+}
+
+message FirewallListResponse {
+  ModuleState state = 1;
+  bytes ruleset = 2; // current nftables ruleset, as text
+}
+
+message FirewallApplyRulesetRequest {
+  bytes ruleset = 1;
+}
+
+message FirewallApplyRulesetResponse {
+  bool accepted = 1;
+  repeated string errors = 2;
+}

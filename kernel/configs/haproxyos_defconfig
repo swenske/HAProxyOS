@@ -1,0 +1,7 @@
+# HAProxyOS kernel defconfig.
+#
+# Empty placeholder - Phase 0 scaffolding only. Produced and updated via
+# `make kernel-menuconfig` (see ../../Makefile), never hand-edited.
+# The curated, minimal config (CONFIG_MODULES=n or tightly restricted,
+# kernel lockdown, no unused filesystem/driver support, etc. - see
+# ../../docs/architecture.md) lands in Phase 1.

@@ -1,0 +1,39 @@
+# Reasonable-default lint config for a Go project, mirrored from the
+# swenske/gotochanger baseline (v2 schema).
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet       # correctness: suspicious constructs, printf checks, etc.
+    - staticcheck  # SA*/ST*/QF* checks: bugs, style, simplifications
+    - errcheck    # unchecked error return values
+    - ineffassign # assignments that are never used
+    - unused      # unused identifiers
+    - misspell    # comment/string typos
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      # Generated protobuf/gRPC code - never hand-edited, never linted.
+      - gen$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - gen$

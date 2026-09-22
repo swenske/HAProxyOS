@@ -1,0 +1,331 @@
+syntax = "proto3";
+
+package haproxyos.v1alpha1;
+
+import "google/protobuf/empty.proto";
+import "haproxyos/v1alpha1/common.proto";
+
+option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+
+// SystemService is the reduced, non-Kubernetes equivalent of Talos's
+// MachineService: machine lifecycle, declarative configuration,
+// observability, managed-service control, and the handful of read-only
+// file/network RPCs that replace an interactive shell. See
+// docs/api-routes.md for the full design rationale.
+//
+// Every method implemented so far in internal/api returns
+// codes.Unimplemented - this contract is deliberately defined ahead of its
+// implementation so the wire format is stable from day one (see plan
+// Phase 0). Implementations land service by service in later phases.
+service SystemService {
+  rpc Version(google.protobuf.Empty) returns (VersionResponse);
+  rpc Hostname(google.protobuf.Empty) returns (HostnameResponse);
+
+  // Reboot power-cycles the whole machine.
+  rpc Reboot(RebootRequest) returns (RebootResponse);
+  rpc Shutdown(google.protobuf.Empty) returns (ShutdownResponse);
+  // Restart restarts the haproxyosd control-plane process in place,
+  // without rebooting the machine or interrupting HAProxy itself.
+  rpc Restart(google.protobuf.Empty) returns (RestartResponse);
+  // Reset wipes the requested partitions (state/ephemeral) and reboots -
+  // the equivalent of returning the node to its just-installed state.
+  rpc Reset(ResetRequest) returns (ResetResponse);
+
+  // ApplyConfiguration validates and applies a full declarative machine
+  // configuration (see internal/config), streaming progress and
+  // validation errors back to the caller.
+  rpc ApplyConfiguration(ApplyConfigurationRequest) returns (stream ApplyConfigurationResponse);
+
+  // Events streams the machine's internal event log (config applied,
+  // service state changes, upgrade progress, etc.).
+  rpc Events(EventsRequest) returns (stream Event);
+  // Dmesg streams the kernel ring buffer.
+  rpc Dmesg(DmesgRequest) returns (stream Data);
+  // Logs streams a managed service's log output.
+  rpc Logs(LogsRequest) returns (stream Data);
+
+  rpc Stats(google.protobuf.Empty) returns (StatsResponse);
+  rpc SystemStat(google.protobuf.Empty) returns (SystemStatResponse);
+  rpc Memory(google.protobuf.Empty) returns (MemoryResponse);
+  rpc CPUInfo(google.protobuf.Empty) returns (CPUInfoResponse);
+  rpc LoadAvg(google.protobuf.Empty) returns (LoadAvgResponse);
+  rpc DiskStats(google.protobuf.Empty) returns (DiskStatsResponse);
+  rpc DiskUsage(DiskUsageRequest) returns (stream DiskUsageInfo);
+  rpc NetworkDeviceStats(google.protobuf.Empty) returns (NetworkDeviceStatsResponse);
+  rpc Netstat(google.protobuf.Empty) returns (NetstatResponse);
+  rpc Mounts(google.protobuf.Empty) returns (MountsResponse);
+  rpc Processes(google.protobuf.Empty) returns (ProcessesResponse);
+
+  rpc ServiceList(google.protobuf.Empty) returns (ServiceListResponse);
+  rpc ServiceStart(ServiceRequest) returns (ServiceResponse);
+  rpc ServiceStop(ServiceRequest) returns (ServiceResponse);
+  rpc ServiceRestart(ServiceRequest) returns (ServiceResponse);
+
+  // List, Read, Copy and PacketCapture are the deliberate, narrow
+  // replacements for an interactive shell: read-only, scoped, never
+  // arbitrary command execution.
+  rpc List(ListRequest) returns (stream FileInfo);
+  rpc Read(ReadRequest) returns (stream Data);
+  rpc Copy(CopyRequest) returns (stream Data);
+  rpc PacketCapture(PacketCaptureRequest) returns (stream Data);
+
+  // MetaWrite/MetaDelete manage small key/value entries on the META
+  // partition (outside the immutable rootfs) - install-time metadata,
+  // not general storage.
+  rpc MetaWrite(MetaWriteRequest) returns (google.protobuf.Empty);
+  rpc MetaDelete(MetaDeleteRequest) returns (google.protobuf.Empty);
+
+  // GenerateClientConfiguration issues a short-lived client certificate
+  // for mTLS bootstrap (see internal/pki).
+  rpc GenerateClientConfiguration(GenerateClientConfigurationRequest) returns (GenerateClientConfigurationResponse);
+}
+
+message VersionResponse {
+  string version = 1;
+  string git_commit = 2;
+  string build_date = 3;
+  string go_version = 4;
+  string kernel_version = 5;
+}
+
+message HostnameResponse {
+  string hostname = 1;
+}
+
+enum RebootMode {
+  REBOOT_MODE_DEFAULT = 0;
+  REBOOT_MODE_POWERCYCLE = 1;
+}
+
+message RebootRequest {
+  RebootMode mode = 1;
+}
+
+message RebootResponse {}
+
+message ShutdownResponse {}
+
+message RestartResponse {}
+
+message ResetRequest {
+  bool wipe_state = 1;
+  bool wipe_ephemeral = 2;
+}
+
+message ResetResponse {}
+
+message ApplyConfigurationRequest {
+  bytes config_yaml = 1;
+
+  enum Mode {
+    MODE_AUTO = 0;      // reboot only if the change requires it
+    MODE_NO_REBOOT = 1; // apply live, fail if a reboot would be required
+    MODE_REBOOT = 2;    // always reboot after applying
+    MODE_TRY = 3;       // apply, auto-rollback if the node isn't healthy within timeout
+  }
+  Mode mode = 2;
+  // Only used with MODE_TRY.
+  uint32 try_timeout_seconds = 3;
+}
+
+message ApplyConfigurationResponse {
+  string message = 1;
+  bool reboot_required = 2;
+}
+
+message EventsRequest {
+  // Resume streaming from this point instead of the current tail.
+  uint64 since_id = 1;
+}
+
+message Event {
+  uint64 id = 1;
+  int64 unix_time_ns = 2;
+  string type = 3;
+  bytes payload = 4;
+}
+
+message DmesgRequest {
+  bool follow = 1;
+}
+
+message LogsRequest {
+  // A managed service id (see ServiceInfo.id): "haproxy", "bird",
+  // "keepalived", "haproxyosd".
+  string id = 1;
+  bool follow = 2;
+  int32 tail_lines = 3;
+}
+
+message StatsResponse {
+  repeated ProcessStat processes = 1;
+}
+
+message ProcessStat {
+  string id = 1;
+  double cpu_percent = 2;
+  uint64 memory_bytes = 3;
+}
+
+message SystemStatResponse {
+  uint64 boot_time_unix = 1;
+  uint64 context_switches = 2;
+  uint64 processes_created = 3;
+}
+
+message MemoryResponse {
+  uint64 total_bytes = 1;
+  uint64 available_bytes = 2;
+  uint64 cached_bytes = 3;
+}
+
+message CPUInfoResponse {
+  repeated CPUInfo cpus = 1;
+}
+
+message CPUInfo {
+  uint32 processor = 1;
+  string model_name = 2;
+  double mhz = 3;
+}
+
+message LoadAvgResponse {
+  double load1 = 1;
+  double load5 = 2;
+  double load15 = 3;
+}
+
+message DiskStatsResponse {
+  repeated DiskStat disks = 1;
+}
+
+message DiskStat {
+  string device_name = 1;
+  uint64 read_completed = 2;
+  uint64 write_completed = 3;
+}
+
+message DiskUsageRequest {
+  repeated string paths = 1;
+  bool recursive = 2;
+}
+
+message DiskUsageInfo {
+  string path = 1;
+  int64 size_bytes = 2;
+  bool is_dir = 3;
+}
+
+message NetworkDeviceStatsResponse {
+  repeated NetworkDeviceStat devices = 1;
+}
+
+message NetworkDeviceStat {
+  string name = 1;
+  uint64 rx_bytes = 2;
+  uint64 tx_bytes = 3;
+  uint64 rx_errors = 4;
+  uint64 tx_errors = 5;
+}
+
+message NetstatResponse {
+  repeated Connection connections = 1;
+}
+
+message Connection {
+  string local_address = 1;
+  string remote_address = 2;
+  string state = 3;
+  string protocol = 4;
+}
+
+message MountsResponse {
+  repeated MountStat mounts = 1;
+}
+
+message MountStat {
+  string filesystem = 1;
+  string mounted_on = 2;
+  uint64 size_bytes = 3;
+  uint64 available_bytes = 4;
+  bool read_only = 5;
+}
+
+message ProcessesResponse {
+  repeated ProcessInfo processes = 1;
+}
+
+message ProcessInfo {
+  int32 pid = 1;
+  string command = 2;
+  double cpu_percent = 3;
+  uint64 memory_bytes = 4;
+}
+
+message ServiceInfo {
+  string id = 1;
+  string state = 2;  // e.g. "running", "stopped", "failed"
+  string health = 3; // e.g. "healthy", "unhealthy", "unknown"
+}
+
+message ServiceListResponse {
+  repeated ServiceInfo services = 1;
+}
+
+message ServiceRequest {
+  string id = 1;
+}
+
+message ServiceResponse {
+  ServiceInfo service = 1;
+}
+
+message ListRequest {
+  string root = 1;
+  bool recursive = 2;
+}
+
+message FileInfo {
+  string name = 1;
+  string relative_name = 2;
+  int64 size = 3;
+  uint32 mode = 4;
+  bool is_dir = 5;
+  string error = 6;
+}
+
+message ReadRequest {
+  string path = 1;
+}
+
+message CopyRequest {
+  // Root path to stream as a tar archive.
+  string root_path = 1;
+}
+
+message PacketCaptureRequest {
+  string interface = 1;
+  string bpf_filter = 2;
+  bool promiscuous = 3;
+}
+
+message MetaWriteRequest {
+  uint32 key = 1;
+  bytes value = 2;
+}
+
+message MetaDeleteRequest {
+  uint32 key = 1;
+}
+
+message GenerateClientConfigurationRequest {
+  // Role names to embed in the issued client certificate, validated
+  // against internal/pki's role set (e.g. "os:admin", "os:reader").
+  repeated string roles = 1;
+}
+
+message GenerateClientConfigurationResponse {
+  bytes ca = 1;
+  bytes crt = 2;
+  bytes key = 3;
+}

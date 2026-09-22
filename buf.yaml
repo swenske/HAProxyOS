@@ -1,0 +1,13 @@
+version: v2
+modules:
+  - path: api/proto
+lint:
+  # BASIC (not the stricter STANDARD) - this API deliberately reuses
+  # google.protobuf.Empty and terse response names across several RPCs,
+  # mirroring Talos's own machine.proto style (see docs/api-routes.md),
+  # which STANDARD's per-RPC message-naming rules would otherwise flag.
+  use:
+    - BASIC
+breaking:
+  use:
+    - FILE

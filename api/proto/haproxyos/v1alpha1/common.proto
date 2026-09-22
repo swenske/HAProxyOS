@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package haproxyos.v1alpha1;
+
+option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+
+// Data is a chunk of a byte stream, reused by every RPC that streams
+// unstructured output (Logs, Dmesg, PacketCapture, Copy, Read) instead of
+// giving each one its own single-field wrapper message.
+message Data {
+  bytes bytes = 1;
+}
+
+// Metadata carries the identity of the node that produced a response,
+// mirroring Talos's per-response metadata so a client talking to several
+// nodes at once (e.g. through a future load-balancing proxy) can tell
+// results apart.
+message Metadata {
+  string hostname = 1;
+  // Set when the RPC failed but the transport still returned a response
+  // envelope instead of a bare gRPC error - reserved for future use.
+  string error = 2;
+}

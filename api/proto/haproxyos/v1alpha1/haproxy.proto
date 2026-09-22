@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package haproxyos.v1alpha1;
+
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+
+// HAProxyService is HAProxyOS's differentiating API surface: it's what
+// haproxyosctl (and any external controller) uses to configure and drive
+// HAProxy instead of editing haproxy.cfg over SSH. See internal/haproxy
+// for the implementation (config render/validate/reload, runtime API
+// client over the stats socket).
+service HAProxyService {
+  rpc GetConfig(google.protobuf.Empty) returns (GetConfigResponse);
+  // ApplyConfig validates the given config via `haproxy -c` before
+  // reloading - a rejected config never reaches the running process.
+  rpc ApplyConfig(ApplyConfigRequest) returns (stream ApplyConfigResponse);
+  // ValidateConfig runs the same validation as ApplyConfig without
+  // touching the running process (dry-run).
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  // Reload triggers a seamless (zero-downtime) reload of the currently
+  // applied config.
+  rpc Reload(google.protobuf.Empty) returns (ReloadResponse);
+
+  // Stats proxies HAProxy's own stats socket ("show stat").
+  rpc Stats(google.protobuf.Empty) returns (HAProxyStatsResponse);
+  // ShowInfo proxies the stats socket's "show info".
+  rpc ShowInfo(google.protobuf.Empty) returns (ShowInfoResponse);
+
+  rpc BackendList(google.protobuf.Empty) returns (BackendListResponse);
+  // ServerSetState enables/disables/drains a single backend server at
+  // runtime (stats socket "set server ... state ...").
+  rpc ServerSetState(ServerSetStateRequest) returns (google.protobuf.Empty);
+
+  // Runtime maps (stats socket "show/add/del/set map").
+  rpc MapList(google.protobuf.Empty) returns (MapListResponse);
+  rpc MapGet(MapGetRequest) returns (MapGetResponse);
+  rpc MapUpdate(MapUpdateRequest) returns (google.protobuf.Empty);
+
+  rpc ACLUpdate(ACLUpdateRequest) returns (google.protobuf.Empty);
+
+  rpc CertificateList(google.protobuf.Empty) returns (CertificateListResponse);
+  rpc CertificateUpload(CertificateUploadRequest) returns (google.protobuf.Empty);
+  rpc CertificateDelete(CertificateDeleteRequest) returns (google.protobuf.Empty);
+}
+
+message GetConfigResponse {
+  bytes config = 1;
+  string sha256 = 2;
+}
+
+message ApplyConfigRequest {
+  bytes config = 1;
+}
+
+message ApplyConfigResponse {
+  string stage = 1; // "validating", "reloading", "done"
+  string message = 2;
+  bool accepted = 3;
+}
+
+message ValidateConfigRequest {
+  bytes config = 1;
+}
+
+message ValidateConfigResponse {
+  bool valid = 1;
+  repeated string errors = 2;
+}
+
+message ReloadResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HAProxyStatsResponse {
+  // Raw "show stat" CSV output from the stats socket, parsed
+  // structurally once a concrete consumer needs it (Phase 2).
+  bytes raw_csv = 1;
+}
+
+message ShowInfoResponse {
+  string version = 1;
+  uint64 uptime_seconds = 2;
+  uint32 current_connections = 3;
+  uint32 max_connections = 4;
+}
+
+message Backend {
+  string name = 1;
+  repeated BackendServer servers = 2;
+}
+
+message BackendServer {
+  string name = 1;
+  string address = 2;
+  string state = 3; // "up", "down", "maint", "drain"
+}
+
+message BackendListResponse {
+  repeated Backend backends = 1;
+}
+
+message ServerSetStateRequest {
+  string backend = 1;
+  string server = 2;
+  enum State {
+    STATE_READY = 0;
+    STATE_DRAIN = 1;
+    STATE_MAINT = 2;
+  }
+  State state = 3;
+}
+
+message MapListResponse {
+  repeated string maps = 1;
+}
+
+message MapGetRequest {
+  string map = 1;
+}
+
+message MapGetResponse {
+  map<string, string> entries = 1;
+}
+
+message MapUpdateRequest {
+  string map = 1;
+  string key = 2;
+  string value = 3;
+  bool delete = 4;
+}
+
+message ACLUpdateRequest {
+  string acl = 1;
+  string value = 2;
+  bool delete = 3;
+}
+
+message CertificateListResponse {
+  repeated CertificateInfo certificates = 1;
+}
+
+message CertificateInfo {
+  string name = 1;
+  string not_after = 2; // RFC3339
+}
+
+message CertificateUploadRequest {
+  string name = 1;
+  bytes pem_bundle = 2; // cert + key (+ chain), PEM-concatenated
+}
+
+message CertificateDeleteRequest {
+  string name = 1;
+}
