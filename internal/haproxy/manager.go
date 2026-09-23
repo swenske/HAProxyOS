@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -73,6 +74,12 @@ func (m *Manager) Apply(cfg []byte) ([]string, error) {
 	if err := os.WriteFile(m.ConfigPath, cfg, 0o644); err != nil {
 		return nil, fmt.Errorf("write config: %w", err)
 	}
+	// ConfigPath may be the Phase 3 cont'd persistent STATE partition
+	// (see rootfs/init/main.go's mountState) - force it to the
+	// underlying block device now, same reasoning as cmd/haproxyosd's
+	// PKI bootstrap: don't let an applied config's durability depend on
+	// some later, unrelated sync happening to occur first.
+	syscall.Sync()
 	return nil, m.startOrReload()
 }
 

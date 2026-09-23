@@ -80,26 +80,96 @@ func mountEphemeral() {
 }
 
 // mountState mounts the pre-formatted, persistent STATE partition (see
-// rootfs/state-image.sh) over /etc/haproxyos/pki, the one thing from
-// mountEphemeral's ephemeral overlay that actually needs to survive a
-// reboot - without it, a fresh CA/admin cert gets generated on every
-// boot. Expected as the third virtio-blk drive (after the squashfs data
-// and dm-verity hash tree drives - see hack/qemu-verity-boot-test.sh vs
-// hack/qemu-state-persist-test.sh for the difference), unlike those two
-// this one is writable, not dm-verity-protected: it's meant to be
-// written to, and losing/corrupting it only costs PKI state, not the
-// system's integrity. Not present in Phase 1/2's initramfs boots, or a
-// verity boot without a third drive attached - mount() fails harmlessly
-// there (see its own doc comment), leaving /etc/haproxyos/pki on the
-// ephemeral tmpfs instead, same fallback behavior as before this
-// existed. The explicit chmod matches internal/pki.LoadOrBootstrap's
-// own intent (0700, not whatever mode mkfs.ext4 gives a fresh
-// filesystem's root directory).
+// rootfs/state-image.sh) once at /mnt/state, then bind-mounts its pki/
+// and haproxy/ subdirectories over /etc/haproxyos/pki and /etc/haproxy
+// respectively - the two things mountEphemeral's tmpfs overlay can't be
+// allowed to wipe every boot: PKI (or a fresh CA/admin cert generates
+// every boot) and applied config (or a live ApplyConfig RPC - which
+// just writes straight to /etc/haproxy/haproxy.cfg, see
+// internal/haproxy.Manager.Apply - is lost the moment the node
+// restarts). Expected as the third virtio-blk drive (after the
+// squashfs data and dm-verity hash tree drives - see
+// hack/qemu-verity-boot-test.sh vs hack/qemu-state-persist-test.sh for
+// the difference); unlike those two this one is writable, not
+// dm-verity-protected, since it's meant to be written to and
+// losing/corrupting it only costs state, not the system's integrity.
+// Not present in Phase 1/2's initramfs boots, or a verity boot without
+// a third drive attached - mount() fails harmlessly there (see its own
+// doc comment), leaving both directories on the ephemeral tmpfs
+// instead, same fallback behavior as before this existed.
 func mountState() {
-	const dir = "/etc/haproxyos/pki"
-	mount("/dev/vdc", dir, "ext4")
-	if err := os.Chmod(dir, 0o700); err != nil {
-		fmt.Printf("init: chmod %s: %v\n", dir, err)
+	// Has to live inside the already-writable tmpfs /etc (mountEphemeral
+	// runs first, see main()), not some fresh top-level path like
+	// /mnt/state: root itself is still the dm-verity-verified, read-only
+	// squashfs, so os.MkdirAll on a path that doesn't already exist
+	// there fails outright - caught by a real boot regenerating a new
+	// CA every time despite this function running, because every step
+	// past that failed MkdirAll silently no-op'd (mount()/bindMount()
+	// only log and return on error, never abort the boot).
+	const stateRoot = "/etc/.state"
+	mount("/dev/vdc", stateRoot, "ext4")
+
+	// pki/: created with 0700 directly (matching
+	// internal/pki.LoadOrBootstrap's own intent) rather than mounting
+	// the STATE device straight at /etc/haproxyos/pki and chmod-ing
+	// afterward - a bind mount's target shows the *source* directory's
+	// mode, so controlling it here is enough, no separate chmod needed.
+	pkiDir := filepath.Join(stateRoot, "pki")
+	if err := os.MkdirAll(pkiDir, 0o700); err != nil {
+		fmt.Printf("init: mkdir %s: %v\n", pkiDir, err)
+	} else {
+		bindMount(pkiDir, "/etc/haproxyos/pki")
+	}
+
+	// haproxy/: needs the same first-boot seeding problem mountEphemeral
+	// already solved for /etc itself - a blank STATE partition's
+	// haproxy/ subdirectory has no haproxy.cfg yet, and bind-mounting it
+	// over /etc/haproxy as-is would hide the bootstrap default
+	// mountEphemeral just put there, leaving HAProxy nothing to start
+	// from. So the bootstrap bytes are copied in *only if this is still
+	// empty* - once a real ApplyConfig has written something there, a
+	// later boot must never overwrite it back to the bootstrap default.
+	haproxyDir := filepath.Join(stateRoot, "haproxy")
+	seedPersistentHaproxyCfg(haproxyDir)
+	bindMount(haproxyDir, "/etc/haproxy")
+}
+
+func seedPersistentHaproxyCfg(dir string) {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Printf("init: mkdir %s: %v\n", dir, err)
+		return
+	}
+
+	const cfgName = "haproxy.cfg"
+	dst := filepath.Join(dir, cfgName)
+	if _, err := os.Stat(dst); err == nil {
+		return // already has a persisted config (bootstrap or applied) - never overwrite it
+	}
+
+	// Still the mountEphemeral-seeded bootstrap default at this point -
+	// mountState always runs after mountEphemeral (see main()).
+	src := "/etc/haproxy/" + cfgName
+	cfgBytes, err := os.ReadFile(src)
+	if err != nil {
+		fmt.Printf("init: read %s to seed persistent state: %v\n", src, err)
+		return
+	}
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(src); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(dst, cfgBytes, mode); err != nil {
+		fmt.Printf("init: write %s: %v\n", dst, err)
+	}
+}
+
+func bindMount(src, dst string) {
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		fmt.Printf("init: mkdir %s: %v\n", dst, err)
+		return
+	}
+	if err := syscall.Mount(src, dst, "", syscall.MS_BIND, ""); err != nil {
+		fmt.Printf("init: bind mount %s on %s: %v\n", src, dst, err)
 	}
 }
 

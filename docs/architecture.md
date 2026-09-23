@@ -326,29 +326,46 @@ plan - not implemented yet.
   HAProxy startup, config read) genuinely works from a dm-verity-booted,
   read-only node, not just that the kernel got as far as running
   `/sbin/init`.
-  A real persistent STATE partition now backs `/etc/haproxyos/pki`
-  specifically: `rootfs/state-image.sh` pre-formats a small, blank ext4
-  image at **build time** (`mkfs.ext4` - no mkfs binary ships on the
-  target, matching the "no package manager on the node" rule; needed
-  `CONFIG_EXT4_FS` in the kernel, pulled in cleanly via `select` with no
-  gating-menu surprise this time), and `rootfs/init/main.go`'s new
-  `mountState` mounts it - read-write, *not* dm-verity-protected, since
-  it's meant to be written to - over `/etc/haproxyos/pki` as a third
-  virtio-blk drive, after `mountEphemeral` has already put a tmpfs at
-  `/etc`. `cmd/haproxyosd`'s PKI bootstrap now calls `syscall.Sync()`
-  right after writing the CA/certs, so durability doesn't depend on
-  QEMU's own shutdown-time cache flush. Proven with a real two-boot
-  test (`hack/qemu-state-persist-test.sh`, not just "the mount didn't
-  error"): boots the *same* `state.img` twice - the first boot must log
-  haproxyosd's "first boot - generated a new CA" line, the second must
-  not, `internal/pki.LoadOrBootstrap` finding and loading the CA
-  written by the first boot instead of generating a new one.
-  Still open: applied config (`ApplyConfig`) still doesn't survive a
-  reboot - only `/etc/haproxyos/pki` lives on the STATE partition so
-  far, everything else under `/etc` is still the plain `mountEphemeral`
-  tmpfs. That, plus A/B partitioning, UEFI + a Unified Kernel Image,
-  Secure Boot signing, and the `LifecycleService` RPCs to drive an
-  actual install/upgrade/rollback, are still separate, unbuilt pieces.
+  A real persistent STATE partition now backs both `/etc/haproxyos/pki`
+  **and** applied HAProxy config: `rootfs/state-image.sh` pre-formats a
+  small, blank ext4 image at **build time** (`mkfs.ext4` - no mkfs
+  binary ships on the target, matching the "no package manager on the
+  node" rule; needed `CONFIG_EXT4_FS` in the kernel, pulled in cleanly
+  via `select` with no gating-menu surprise this time), and
+  `rootfs/init/main.go`'s new `mountState` mounts it once, at
+  `/etc/.state` (has to live inside the tmpfs `mountEphemeral` already
+  put at `/etc` - a fresh path like `/mnt/state` doesn't exist on the
+  read-only squashfs root and can't be created there; caught by a real
+  boot silently regenerating a new CA every time despite `mountState`
+  running, since every step past the failed `MkdirAll` just logged and
+  moved on rather than aborting the boot), then bind-mounts its `pki/`
+  and `haproxy/` subdirectories over `/etc/haproxyos/pki` and
+  `/etc/haproxy` respectively. `/etc/haproxy` needs first-boot seeding
+  the same way `mountEphemeral` already seeds `/etc` itself: the
+  bootstrap `haproxy.cfg` bytes are copied into the persistent
+  `haproxy/` subdirectory *only if it's still empty*, so a later boot
+  after a real `ApplyConfig` never gets overwritten back to the
+  bootstrap default. Both `cmd/haproxyosd`'s PKI bootstrap and
+  `internal/haproxy.Manager.Apply` now call `syscall.Sync()` right
+  after writing, so durability doesn't depend on QEMU's own
+  shutdown-time cache flush.
+  Proven with a real three-boot test (`hack/qemu-state-persist-test.sh`,
+  not just "the mount didn't error"), against the *same* `state.img`
+  each time: boot 1 must log haproxyosd's "first boot - generated a new
+  CA" line (fresh bootstrap) and serve on the bootstrap default's
+  `:8080`; boot 2 must not log that line again (loaded, not
+  regenerated); between boot 2 and boot 3 the script directly
+  loop-mounts `state.img` on the **host** and overwrites the persisted
+  `haproxy.cfg` with one bound to `:8081` instead - standing in for a
+  real `ApplyConfig` RPC (already covered elsewhere by
+  `image-build.yml`'s own mTLS integration test; what's under test here
+  is specifically whether `Manager.Apply`'s write target actually lives
+  on persistent storage) - and boot 3 must answer on `:8081` and
+  specifically **not** on `:8080`, proving HAProxy started from the
+  persisted config, not the squashfs's read-only bootstrap default.
+  Still open: A/B partitioning, UEFI + a Unified Kernel Image, Secure
+  Boot signing, and the `LifecycleService` RPCs to drive an actual
+  install/upgrade/rollback are still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

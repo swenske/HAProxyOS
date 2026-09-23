@@ -260,20 +260,22 @@ jobs:
         run: make qemu-verity-boot-test
 
       # Phase 3 cont'd: proves rootfs/state-image.sh's persistent STATE
-      # partition survives a reboot, not just that it mounts - boots the
-      # SAME state.img twice and checks haproxyosd's own "first boot"
-      # log line appears once, not twice. See
-      # hack/qemu-state-persist-test.sh and rootfs/init/main.go's
-      # mountState/mountEphemeral for what's ephemeral (/run, /tmp,
-      # most of /etc) vs persistent (/etc/haproxyos/pki only, for now).
+      # partition survives a reboot, not just that it mounts - three
+      # boots against the SAME state.img: haproxyosd's "first boot" log
+      # line appears once, not twice (PKI persists), and a config
+      # written directly onto the persisted haproxy/ subdirectory
+      # between boots (standing in for a real ApplyConfig RPC) is what
+      # HAProxy actually starts from afterward, not the squashfs's
+      # read-only bootstrap default. See hack/qemu-state-persist-test.sh
+      # and rootfs/init/main.go's mountState/mountEphemeral for what's
+      # ephemeral (/run, /tmp) vs persistent (/etc/haproxyos/pki and
+      # /etc/haproxy, bind-mounted from the STATE partition).
       - name: Persistent STATE partition survives a reboot (Phase 3 cont'd)
         run: make qemu-state-persist-test
 
       # TODO(Phase 3 cont'd): A/B partition layout (image/disk), UEFI
       # boot + Unified Kernel Image, Secure Boot signing, image/iso,
       # image/kvm-proxmox, image/vmware, LifecycleService.Install/
-      # Upgrade/Rollback, upload artifacts to a GitHub Release. Applied
-      # config (ApplyConfig) still doesn't persist across a reboot -
-      # only /etc/haproxyos/pki lives on the STATE partition so far.
+      # Upgrade/Rollback, upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.
