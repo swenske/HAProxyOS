@@ -12,7 +12,8 @@ GEN_DIR := gen
 
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
 	kernel-build init initramfs qemu-boot-test haproxy-build \
-	daemon-static initramfs-full qemu-network-test rootfs-build
+	daemon-static initramfs-full qemu-network-test rootfs-build \
+	qemu-verity-boot-test
 
 all: build
 
@@ -125,12 +126,24 @@ qemu-network-test: kernel-build initramfs-full
 # haproxy + bootstrap config, same content as initramfs-full but as a
 # proper filesystem image instead of a cpio archive) and its dm-verity
 # hash tree (see rootfs/assemble.sh). Requires mksquashfs (squashfs-tools)
-# and veritysetup (cryptsetup-bin) on PATH - neither needs root. Not yet
-# wired up as something the kernel actually boots from (still
-# initramfs-only for that, see qemu-boot-test/qemu-network-test) - this
-# is the build-side half of Phase 3's immutability story, verified by
-# mounting + `veritysetup verify`, not by booting from it yet.
+# and veritysetup (cryptsetup-bin) on PATH - neither needs root. This is
+# the build-side half of Phase 3's immutability story, verified by
+# mounting + `veritysetup verify` - see qemu-verity-boot-test for the
+# kernel actually booting from it.
 rootfs-build: init daemon-static haproxy-build
 	mkdir -p $(BUILD_DIR)/rootfs
 	./rootfs/assemble.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/init $(BUILD_DIR)/haproxyosd \
 		$(BUILD_DIR)/haproxy rootfs/base/etc/haproxy/haproxy.cfg
+
+# Phase 3 cont'd: boots the kernel directly from rootfs-build's
+# squashfs+dm-verity image via the "dm-mod.create=" cmdline parameter
+# (CONFIG_DM_INIT) - no initramfs, no userspace verity setup at all. Two
+# virtio-blk drives (squashfs data + verity hash tree), the kernel
+# assembles and verifies /dev/dm-0 itself before mounting it as root and
+# running /sbin/init straight out of the verified image. Also re-runs
+# the boot against a corrupted copy of the image and checks the kernel
+# refuses to mount it - see hack/qemu-verity-boot-test.sh for exactly
+# why (superblock corruption, not a random offset) and how the dm-verity
+# table's fields are derived from rootfs.verity.info.
+qemu-verity-boot-test: kernel-build rootfs-build
+	./hack/qemu-verity-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs

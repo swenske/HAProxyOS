@@ -35,6 +35,21 @@
 #   CONFIG_MISC_FILESYSTEMS=y CONFIG_SQUASHFS=y CONFIG_SQUASHFS_XZ=y
 #   CONFIG_MD=y CONFIG_BLK_DEV_DM=y CONFIG_DM_VERITY=y
 #
+#   # dm-verity root=, no initramfs (Phase 3 cont'd: rootfs/assemble.sh's
+#   # squashfs+verity image mounted directly as the real root via the
+#   # dm-mod.create= cmdline parameter, no userspace stage at all) - same
+#   # gating-menu trap again: VIRTIO_BLK lives under drivers/block's own
+#   # "menuconfig BLK_DEV" (default y, but allnoconfig starts everything
+#   # off, so it still has to be listed explicitly).
+#   CONFIG_BLK_DEV=y CONFIG_VIRTIO_BLK=y CONFIG_DM_INIT=y
+#   # DM_VERITY's own `select CRYPTO_HASH` doesn't pull in an actual
+#   # sha256 algorithm - it resolves "sha256" by name through the crypto
+#   # API (crypto_alloc_shash), which needs CONFIG_CRYPTO_SHA256, not the
+#   # CONFIG_CRYPTO_LIB_SHA256 helper other kernel code already pulled in
+#   # (found by a real boot failing with "Cannot initialize hash
+#   # function (-2)").
+#   CONFIG_CRYPTO_SHA256=y
+#
 # Deliberately the FULL resolved config (every symbol explicit), not a
 # compact savedefconfig diff: a diff format resolves unlisted symbols
 # against the kernel's own defconfig-derived defaults, which would
@@ -361,6 +376,7 @@ CONFIG_X86_DIRECT_GBPAGES=y
 CONFIG_ARCH_SPARSEMEM_ENABLE=y
 CONFIG_ARCH_SPARSEMEM_DEFAULT=y
 CONFIG_ILLEGAL_POINTER_VALUE=0xdead000000000000
+# CONFIG_X86_PMEM_LEGACY is not set
 # CONFIG_X86_CHECK_BIOS_CORRUPTION is not set
 CONFIG_MTRR=y
 # CONFIG_MTRR_SANITIZER is not set
@@ -1045,7 +1061,19 @@ CONFIG_DMI_SCAN_MACHINE_NON_EFI_FALLBACK=y
 # CONFIG_OF is not set
 CONFIG_ARCH_MIGHT_HAVE_PC_PARPORT=y
 # CONFIG_PARPORT is not set
-# CONFIG_BLK_DEV is not set
+CONFIG_BLK_DEV=y
+# CONFIG_BLK_DEV_NULL_BLK is not set
+# CONFIG_BLK_DEV_FD is not set
+# CONFIG_BLK_DEV_PCIESSD_MTIP32XX is not set
+# CONFIG_ZRAM is not set
+# CONFIG_BLK_DEV_LOOP is not set
+# CONFIG_BLK_DEV_DRBD is not set
+# CONFIG_BLK_DEV_NBD is not set
+# CONFIG_BLK_DEV_RAM is not set
+# CONFIG_ATA_OVER_ETH is not set
+CONFIG_VIRTIO_BLK=y
+# CONFIG_BLK_DEV_RBD is not set
+# CONFIG_BLK_DEV_UBLK is not set
 
 #
 # NVME Support
@@ -1126,7 +1154,7 @@ CONFIG_DM_BUFIO=y
 # CONFIG_DM_MULTIPATH is not set
 # CONFIG_DM_DELAY is not set
 # CONFIG_DM_DUST is not set
-# CONFIG_DM_INIT is not set
+CONFIG_DM_INIT=y
 # CONFIG_DM_UEVENT is not set
 # CONFIG_DM_FLAKEY is not set
 CONFIG_DM_VERITY=y
@@ -1839,6 +1867,7 @@ CONFIG_CLKBLD_I8253=y
 # CONFIG_ANDROID_BINDER_IPC is not set
 # end of Android
 
+# CONFIG_LIBNVDIMM is not set
 # CONFIG_DAX is not set
 # CONFIG_NVMEM is not set
 
@@ -2163,7 +2192,7 @@ CONFIG_CRYPTO_HASH2=y
 # CONFIG_CRYPTO_MICHAEL_MIC is not set
 # CONFIG_CRYPTO_RMD160 is not set
 # CONFIG_CRYPTO_SHA1 is not set
-# CONFIG_CRYPTO_SHA256 is not set
+CONFIG_CRYPTO_SHA256=y
 # CONFIG_CRYPTO_SHA512 is not set
 # CONFIG_CRYPTO_SHA3 is not set
 # CONFIG_CRYPTO_SM3_GENERIC is not set
@@ -2337,6 +2366,7 @@ CONFIG_HAVE_GENERIC_VDSO=y
 CONFIG_GENERIC_GETTIMEOFDAY=y
 CONFIG_GENERIC_VDSO_OVERFLOW_PROTECT=y
 CONFIG_VDSO_GETRANDOM=y
+CONFIG_SG_POOL=y
 CONFIG_ARCH_HAS_PMEM_API=y
 CONFIG_ARCH_HAS_CPU_CACHE_INVALIDATE_MEMREGION=y
 CONFIG_ARCH_HAS_UACCESS_FLUSHCACHE=y

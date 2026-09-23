@@ -273,16 +273,50 @@ plan - not implemented yet.
   leaking into the squashfs root directory's own mode was a second,
   related "build user's own environment quietly changes the image"
   bug, fixed with an explicit `-root-mode 0755`.
-  Still open, and where this stops for now: none of this is wired up as
-  something the kernel actually **boots from** yet - Phase 1/2's plain
-  initramfs is still what boots under QEMU (verified to still work,
-  unchanged, after the kernel config grew this support). That needs a
-  way to set up the dm-verity device before or without a full initramfs
-  userspace (the `dm-mod.create=` kernel cmdline parameter, or a small
-  amount of Go doing the device-mapper ioctls itself), then A/B
-  partitioning, UEFI + a Unified Kernel Image, Secure Boot signing, and
-  the `LifecycleService` RPCs to drive an actual install/upgrade/rollback
-  - none of that exists yet.
+  The kernel now boots root **directly from that dm-verity-protected
+  squashfs image** - no initramfs, no userspace verity setup at all -
+  via the `dm-mod.create=` cmdline parameter (`CONFIG_DM_INIT`, built
+  for exactly this: "allow mounting rootfs without requiring an
+  initramfs"). Two virtio-blk drives (squashfs data + verity hash tree),
+  the kernel assembles and verifies `/dev/dm-0` itself before mounting
+  it read-only and running `/sbin/init` straight out of the verified
+  image (see `hack/qemu-verity-boot-test.sh`). Getting there needed
+  three more kernel config additions, each found by a real boot failing
+  first, not by reading docs in advance: `CONFIG_VIRTIO_BLK` (itself
+  gated behind `drivers/block`'s own `menuconfig BLK_DEV`, the same
+  silently-dropped-symbol trap as `SQUASHFS`/`DM_VERITY` above -
+  `CONFIG_BLK_DEV=y` first); `CONFIG_DM_INIT` for the cmdline parameter
+  itself; and `CONFIG_CRYPTO_SHA256` - `DM_VERITY`'s own `select
+  CRYPTO_HASH` doesn't pull in an actual sha256 implementation reachable
+  by name through the crypto API, only the separate `CRYPTO_LIB_SHA256`
+  helper other kernel code already needed - the first boot attempt got
+  as far as constructing the dm-verity target and failed with "Cannot
+  initialize hash function (-2)". The exact dm-verity table string
+  (field order, and in particular `hash_start_block=1` - the hash tree
+  always starts one hash-block after `veritysetup`'s own superblock)
+  was derived and confirmed with a real `dmsetup create --readonly`
+  against loop devices - including deliberately corrupting the
+  underlying data device in place and confirming a live, mounted
+  dm-verity device throws a real I/O error on the next read - before
+  ever putting it in a kernel cmdline. `/dev/vda`/`/dev/vdb` **path**
+  references work in `dm-mod.create=` (`CONFIG_DEVTMPFS_MOUNT=y` gets
+  `/dev` populated in time for it), so there was no need to fall back to
+  the kernel doc's major:minor form. The boot test also reboots against
+  a single-byte-corrupted copy of the image and confirms the *kernel*
+  refuses to mount it - corrupting the squashfs superblock specifically
+  (offset 0), since a random deeper offset (the one the userspace
+  `veritysetup verify` tamper test above uses) can land in a file
+  `/sbin/init` only reads *after* printing its own boot marker, letting
+  a real corruption slip past a naive "did the marker print" check.
+  Still open: the newly-verified root is read-only in the fullest sense
+  - `haproxyosd` now crash-loops forever trying to create
+  `/run/haproxyos` and `/etc/haproxyos/pki`, proving the immutability
+  but leaving nothing bootable end-to-end yet. Needed next: an ephemeral
+  tmpfs overlay for `/run`/`/var`/`/tmp` and a persistent STATE
+  partition for the PKI directory, then A/B partitioning, UEFI + a
+  Unified Kernel Image, Secure Boot signing, and the `LifecycleService`
+  RPCs to drive an actual install/upgrade/rollback - none of that exists
+  yet.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

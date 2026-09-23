@@ -227,8 +227,7 @@ jobs:
       # and its dm-verity hash tree (rootfs/assemble.sh), then proves
       # verification actually works both ways - accepts the real image
       # against its own root hash, and rejects a single-byte-tampered
-      # copy of it. Not yet wired up as something the kernel boots
-      # from - see the TODO below.
+      # copy of it.
       - name: Rootfs squashfs + dm-verity build test (Phase 3)
         run: |
           set -euo pipefail
@@ -251,14 +250,23 @@ jobs:
           fi
           grep -q "Verification failed" /tmp/tamper-check.log || { echo "expected a verification-failed message, got:" >&2; cat /tmp/tamper-check.log >&2; exit 1; }
 
-      # TODO(Phase 3 cont'd): boot the kernel from this squashfs+dm-verity
-      # image instead of the plain initramfs (needs a way to set up the
-      # verity device before/without a full initramfs userspace - either
-      # the dm-mod.create= kernel cmdline parameter or a small amount of
-      # Go doing the device-mapper ioctls itself), A/B partition layout
-      # (image/disk), UEFI boot + Unified Kernel Image, Secure Boot
-      # signing, image/iso, image/kvm-proxmox, image/vmware,
-      # LifecycleService.Install/Upgrade/Rollback, upload artifacts to a
-      # GitHub Release.
+      # Phase 3, second slice: boots the kernel directly from that
+      # squashfs+dm-verity image via the "dm-mod.create=" cmdline
+      # parameter (CONFIG_DM_INIT) - no initramfs, no userspace verity
+      # setup. Also proves the *kernel itself* (not just `veritysetup
+      # verify` on the build host, above) refuses to mount a tampered
+      # copy of the image. See hack/qemu-verity-boot-test.sh.
+      - name: Rootfs dm-verity kernel boot test (Phase 3 cont'd)
+        run: make qemu-verity-boot-test
+
+      # TODO(Phase 3 cont'd): ephemeral overlay for /run, /var, /tmp
+      # (tmpfs) and a persistent STATE partition for /etc/haproxyos/pki -
+      # right now the verity root's read-only-ness is real but total, so
+      # haproxyosd crash-loops forever trying to create either (caught by
+      # actually booting into it - see qemu-verity-boot-test.sh's own
+      # comment). A/B partition layout (image/disk), UEFI boot + Unified
+      # Kernel Image, Secure Boot signing, image/iso, image/kvm-proxmox,
+      # image/vmware, LifecycleService.Install/Upgrade/Rollback, upload
+      # artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.
