@@ -13,7 +13,8 @@ GEN_DIR := gen
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
 	kernel-build init initramfs qemu-boot-test haproxy-build \
 	daemon-static initramfs-full qemu-network-test rootfs-build \
-	qemu-verity-boot-test state-image qemu-state-persist-test
+	qemu-verity-boot-test state-image qemu-state-persist-test \
+	disk-image qemu-ab-boot-test
 
 all: build
 
@@ -168,3 +169,25 @@ state-image:
 # reappear on the second - see hack/qemu-state-persist-test.sh.
 qemu-state-persist-test: kernel-build rootfs-build state-image
 	./hack/qemu-state-persist-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img
+
+# Phase 3 cont'd: assembles a single, real GPT-partitioned disk image
+# with two independently bootable A/B slots (BOOT-A-DATA/HASH,
+# BOOT-B-DATA/HASH - both slots get the same content for now, there's
+# no LifecycleService.Upgrade yet to install something different into
+# the inactive one) plus the STATE partition - the real, single-disk
+# shape a deployed node would actually have, as opposed to
+# qemu-verity-boot-test/qemu-state-persist-test's separate-virtio-blk-
+# drives harness (which keeps working, and still covers what it always
+# covered). Requires sgdisk (gdisk) - doesn't need root. See
+# image/disk/assemble.sh.
+disk-image: rootfs-build state-image
+	./image/disk/assemble.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img
+
+# Phase 3 cont'd: proves both A/B slots of disk-image's single GPT disk
+# are actually, independently bootable - not just that the partition
+# table looks right. Boots the SAME disk image twice, once with
+# dm-mod.create= pointed at BOOT-A-DATA/BOOT-A-HASH (partitions 1/2),
+# once at BOOT-B-DATA/BOOT-B-HASH (partitions 3/4); both must serve real
+# HTTP. See hack/qemu-ab-boot-test.sh.
+qemu-ab-boot-test: kernel-build disk-image
+	./hack/qemu-ab-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs

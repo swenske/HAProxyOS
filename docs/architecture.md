@@ -366,9 +366,46 @@ plan - not implemented yet.
   on persistent storage) - and boot 3 must answer on `:8081` and
   specifically **not** on `:8080`, proving HAProxy started from the
   persisted config, not the squashfs's read-only bootstrap default.
-  Still open: A/B partitioning, UEFI + a Unified Kernel Image, Secure
-  Boot signing, and the `LifecycleService` RPCs to drive an actual
-  install/upgrade/rollback are still separate, unbuilt pieces.
+  A real GPT A/B partition layout now exists too:
+  `image/disk/assemble.sh` builds a single disk image with two
+  independently bootable slots - `BOOT-A-DATA`/`BOOT-A-HASH` and
+  `BOOT-B-DATA`/`BOOT-B-HASH` (each a squashfs + dm-verity hash tree
+  pair, fixed-size and over-provisioned like a real A/B system, not
+  sized to exactly fit today's content) plus `STATE` - all written
+  directly at computed byte offsets (`sgdisk -i` for the exact sector,
+  `dd seek=`), no mount, no loop device, matching the lesson from the
+  STATE-persistence test's own `debugfs` fix above. `CONFIG_EFI_PARTITION`
+  (GPT table *parsing*) turned out to already be on by default - it's
+  independent of `CONFIG_EFI` (the UEFI *runtime services* feature,
+  still not enabled - see below), so no kernel change was needed for
+  the kernel to recognize the partitions at all.
+  `hack/qemu-ab-boot-test.sh` proves both slots are actually,
+  independently bootable, not just that the partition table looks
+  right: boots the *same* `disk.img` twice, `dm-mod.create=` pointed at
+  `/dev/vda1`+`/dev/vda2` (slot A) then `/dev/vda3`+`/dev/vda4` (slot B),
+  both must serve real HTTP. Both slots hold identical content for now
+  - there's no `LifecycleService.Upgrade` yet to install something
+  different into the inactive slot, so this proves the layout/dm-verity-
+  via-partition-device mechanics, not a real upgrade workflow.
+  Still open: `rootfs/init/main.go`'s `mountState` doesn't know how to
+  find the `STATE` partition (or which slot it booted from) on this
+  real single-disk layout yet - it still expects STATE as a separate
+  virtio-blk drive, which `hack/qemu-verity-boot-test.sh`/
+  `qemu-state-persist-test.sh` still provide (deliberately kept as-is -
+  they cover dm-verity tamper detection and STATE persistence, which
+  `qemu-ab-boot-test.sh` doesn't re-test). There's no udev on this
+  system, so no `/dev/disk/by-partlabel/*` to just read - finding STATE
+  robustly needs either a kernel cmdline convention the bootloader/UKI
+  sets, or a small amount of Go parsing the GPT table directly, given
+  init already knows (from its own cmdline) which disk root came from.
+  UEFI boot + a Unified Kernel Image is a bigger jump than it first
+  looked: `CONFIG_EFI` (needed for `CONFIG_EFI_STUB`) `depends on
+  CONFIG_ACPI`, and this kernel has never enabled ACPI at all - "UEFI
+  boot" now also means bringing up a whole new subsystem, not just
+  adding stub support, and is being tracked as its own separate slice
+  rather than folded into A/B partitioning. Secure Boot signing and the
+  `LifecycleService` RPCs to drive an actual install/upgrade/rollback
+  are also still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
