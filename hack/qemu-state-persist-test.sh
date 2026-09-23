@@ -66,16 +66,9 @@ FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 SQUASHFS="$ROOTFS_DIR/rootfs.squashfs"
 VERITY="$ROOTFS_DIR/rootfs.verity"
-INFO="$ROOTFS_DIR/rootfs.verity.info"
-ROOTHASH="$(cat "$ROOTFS_DIR/rootfs.roothash")"
-SALT="$(grep '^Salt:' "$INFO" | awk '{print $2}')"
-DATA_BLOCKS="$(grep '^Data blocks:' "$INFO" | awk '{print $3}')"
-DATA_BLOCK_SIZE="$(grep '^Data block size:' "$INFO" | awk '{print $4}')"
-HASH_BLOCK_SIZE="$(grep '^Hash block size:' "$INFO" | awk '{print $4}')"
-SECTORS=$(( DATA_BLOCKS * DATA_BLOCK_SIZE / 512 ))
 
 dm_table() {
-  echo "vroot,,,ro,0 $SECTORS verity 1 /dev/vda /dev/vdb $DATA_BLOCK_SIZE $HASH_BLOCK_SIZE $DATA_BLOCKS 1 sha256 $ROOTHASH $SALT"
+  "$(dirname "$0")/dm-verity-cmdline.sh" "$ROOTFS_DIR" /dev/vda /dev/vdb
 }
 
 WORKDIR="$(mktemp -d)"

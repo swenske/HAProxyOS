@@ -418,14 +418,61 @@ plan - not implemented yet.
   verity-mapped root, which it does regardless of the backing device's
   own writability, so `STATE` (an ordinary, unprotected partition) can
   be written to without weakening that.
-  UEFI boot + a Unified Kernel Image is a bigger jump than it first
-  looked: `CONFIG_EFI` (needed for `CONFIG_EFI_STUB`) `depends on
-  CONFIG_ACPI`, and this kernel has never enabled ACPI at all - "UEFI
-  boot" now also means bringing up a whole new subsystem, not just
-  adding stub support, and is being tracked as its own separate slice
-  rather than folded into A/B partitioning. Secure Boot signing and the
-  `LifecycleService` RPCs to drive an actual install/upgrade/rollback
-  are also still separate, unbuilt pieces.
+  UEFI boot + a Unified Kernel Image turned out bigger than it first
+  looked, but is now real: `CONFIG_EFI` (needed for `CONFIG_EFI_STUB`)
+  `depends on CONFIG_ACPI`, so getting there meant bringing up ACPI in
+  this kernel for the first time - resolved cleanly (`CONFIG_ACPI=y`
+  alone was enough; its own dependency, `ARCH_SUPPORTS_ACPI`, is
+  unconditionally selected by `X86_64` already), with `CPU_IDLE`/
+  `POWER_SUPPLY`/`THERMAL` coming along as ACPI's own dependents,
+  nothing silently dropped (checked the same way as every kernel config
+  change in this project: grep the real, `olddefconfig`-resolved
+  output, not just trust a clean build).
+  `image/uki/assemble.sh` builds a genuine Unified Kernel Image with
+  `ukify` (systemd-ukify) rather than hand-rolling one with `objcopy`:
+  reading the actual kernel EFI stub source
+  (`drivers/firmware/efi/libstub/efi-stub-helper.c`'s
+  `efi_convert_cmdline`) showed it only ever reads its command line
+  from the EFI `LoadOptions` the firmware passes when an image is
+  launched interactively (matching
+  `Documentation/admin-guide/efi-stub.rst`'s own documented "EFI
+  shell" usage) - it does **not** look for a `.cmdline` PE section on
+  its own, so a plain `objcopy`-assembled UKI booted with no NVRAM
+  entry (the UEFI spec's removable-media fallback path, which is what
+  this needs - no boot menu) would get no cmdline at all. `ukify`'s own
+  stub (systemd-stub) does read `.cmdline`, then chain-loads into the
+  *kernel's own* embedded EFI stub via the EFI handover protocol
+  (`CONFIG_EFI_HANDOVER_PROTOCOL`, on by default once `EFI_STUB` is) -
+  which is exactly why `CONFIG_EFI_STUB` still has to be real in the
+  kernel too, not just present in systemd's stub binary: the code
+  receiving that handover call lives in the kernel.
+  `image/uki/esp-image.sh` builds the FAT32 ESP with `mtools`
+  (`mformat`/`mmd`/`mcopy`) directly against the image file - no mount,
+  no loop device, same reasoning as `rootfs/state-image.sh` and
+  `image/disk/assemble.sh`.
+  `hack/qemu-uefi-boot-test.sh` proves the whole chain works under
+  *real* OVMF UEFI firmware - no QEMU `-kernel`/`-append` shortcut at
+  all, unlike every other boot test in this project. First real attempt
+  caught a genuine bug in the test itself, not the mechanism: the ESP
+  becomes the *first* virtio-blk drive once attached, shifting
+  squashfs/verity from `/dev/vda`+`/dev/vdb` to `/dev/vdb`+`/dev/vdc` -
+  OVMF and the kernel both booted fine, dm-verity even assembled
+  `/dev/dm-0` successfully, but against the ESP's own FAT metadata
+  instead of the real squashfs ("metadata block 1 is corrupted"), since
+  the UKI's baked-in cmdline still referenced the old device order.
+  Since the exact dm-verity table computation was now duplicated across
+  four places (this test plus `hack/qemu-verity-boot-test.sh`/
+  `qemu-ab-boot-test.sh`/`qemu-state-persist-test.sh`), it was factored
+  out into `hack/dm-verity-cmdline.sh`, shared by all four - the other
+  three were re-verified to still pass unchanged after the refactor,
+  not just assumed to.
+  Still open: Secure Boot signing (`ukify build
+  --secureboot-private-key`/`--secureboot-certificate` - needs a real
+  signing key; `CONFIG_EFI_STUB` alone verifies nothing, that's
+  firmware's own Secure Boot policy), merging the ESP into
+  `image/disk/assemble.sh`'s single GPT disk (still a separate image
+  today), and the `LifecycleService` RPCs to drive an actual
+  install/upgrade/rollback are still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

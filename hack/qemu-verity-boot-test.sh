@@ -10,14 +10,15 @@
 # /sbin/init straight out of the verified image (see rootfs/assemble.sh
 # for what's in there).
 #
-# The dm-verity table syntax/field order below (in particular
-# hash_start_block=1 - the hash tree always starts one hash-block after
-# veritysetup's own superblock, which occupies exactly hash_block_size
-# bytes at offset 0 since assemble.sh never passes --hash-offset) and
-# the need for CONFIG_CRYPTO_SHA256 (not just CONFIG_CRYPTO_LIB_SHA256 -
-# dm-verity resolves "sha256" through the crypto API by name, not the
-# raw lib helper) were both confirmed by an actual boot failing first,
-# not assumed from documentation alone.
+# The dm-verity table syntax/field order (see hack/dm-verity-cmdline.sh,
+# shared with the other boot tests and image/uki/assemble.sh - in
+# particular hash_start_block=1: the hash tree always starts one
+# hash-block after veritysetup's own superblock, which occupies exactly
+# hash_block_size bytes at offset 0 since assemble.sh never passes
+# --hash-offset) and the need for CONFIG_CRYPTO_SHA256 (not just
+# CONFIG_CRYPTO_LIB_SHA256 - dm-verity resolves "sha256" through the
+# crypto API by name, not the raw lib helper) were both confirmed by an
+# actual boot failing first, not assumed from documentation alone.
 #
 # Runs two boots:
 #   1. the real, untampered image, with virtio-net + DHCP like Phase 2's
@@ -47,16 +48,9 @@ MARKER="HAPROXYOS_INIT_BOOT_OK"
 
 SQUASHFS="$ROOTFS_DIR/rootfs.squashfs"
 VERITY="$ROOTFS_DIR/rootfs.verity"
-INFO="$ROOTFS_DIR/rootfs.verity.info"
-ROOTHASH="$(cat "$ROOTFS_DIR/rootfs.roothash")"
-SALT="$(grep '^Salt:' "$INFO" | awk '{print $2}')"
-DATA_BLOCKS="$(grep '^Data blocks:' "$INFO" | awk '{print $3}')"
-DATA_BLOCK_SIZE="$(grep '^Data block size:' "$INFO" | awk '{print $4}')"
-HASH_BLOCK_SIZE="$(grep '^Hash block size:' "$INFO" | awk '{print $4}')"
-SECTORS=$(( DATA_BLOCKS * DATA_BLOCK_SIZE / 512 ))
 
 dm_table() {
-  echo "vroot,,,ro,0 $SECTORS verity 1 /dev/vda /dev/vdb $DATA_BLOCK_SIZE $HASH_BLOCK_SIZE $DATA_BLOCKS 1 sha256 $ROOTHASH $SALT"
+  "$(dirname "$0")/dm-verity-cmdline.sh" "$ROOTFS_DIR" /dev/vda /dev/vdb
 }
 
 WORKDIR="$(mktemp -d)"

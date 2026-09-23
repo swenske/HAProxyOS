@@ -14,7 +14,7 @@ GEN_DIR := gen
 	kernel-build init initramfs qemu-boot-test haproxy-build \
 	daemon-static initramfs-full qemu-network-test rootfs-build \
 	qemu-verity-boot-test state-image qemu-state-persist-test \
-	disk-image qemu-ab-boot-test
+	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test
 
 all: build
 
@@ -191,3 +191,24 @@ disk-image: rootfs-build state-image
 # HTTP. See hack/qemu-ab-boot-test.sh.
 qemu-ab-boot-test: kernel-build disk-image
 	./hack/qemu-ab-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
+# exact boot cmdline, one PE/COFF executable - via `ukify`
+# (systemd-ukify), and a FAT32 ESP image with it installed at the
+# UEFI-spec removable-media fallback path (image/uki/esp-image.sh, no
+# mount/loop device, mtools only). root's data/hash devices are baked
+# in as /dev/vdb+/dev/vdc, not /dev/vda+/dev/vdb - the ESP itself takes
+# the vda slot once it's attached (see hack/qemu-uefi-boot-test.sh's own
+# comment for how that was actually caught). Requires ukify
+# (systemd-ukify) and mtools/dosfstools.
+uki-image: kernel-build rootfs-build
+	./image/uki/assemble.sh $(BUILD_DIR)/rootfs/haproxyos.efi $(BUILD_DIR)/bzImage \
+		$(BUILD_DIR)/rootfs /dev/vdb /dev/vdc
+	./image/uki/esp-image.sh $(BUILD_DIR)/rootfs/esp.img $(BUILD_DIR)/rootfs/haproxyos.efi 64
+
+# Phase 3 cont'd: proves the UKI actually boots under *real* UEFI
+# firmware (OVMF) - no QEMU -kernel/-append shortcut at all, unlike
+# every other boot test here. See hack/qemu-uefi-boot-test.sh. Requires
+# OVMF (package: ovmf).
+qemu-uefi-boot-test: uki-image
+	./hack/qemu-uefi-boot-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/esp.img
