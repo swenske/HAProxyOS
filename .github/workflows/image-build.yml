@@ -232,6 +232,13 @@ jobs:
       - name: Rootfs squashfs + dm-verity build test (Phase 3)
         run: |
           set -euo pipefail
+          # veritysetup (cryptsetup-bin) installs to /usr/sbin, which this
+          # runner's non-interactive shell doesn't have on PATH by default
+          # (confirmed on haproxyos-runner01: run 35817622995 failed here
+          # with "command not found" right after rootfs/assemble.sh's own
+          # veritysetup call succeeded, because that script now extends its
+          # own PATH but this step's direct calls below did not).
+          export PATH="$PATH:/usr/sbin:/sbin"
           make rootfs-build
           roothash="$(cat build/rootfs/rootfs.roothash)"
           veritysetup verify build/rootfs/rootfs.squashfs build/rootfs/rootfs.verity "$roothash"
