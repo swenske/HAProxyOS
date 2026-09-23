@@ -387,17 +387,37 @@ plan - not implemented yet.
   - there's no `LifecycleService.Upgrade` yet to install something
   different into the inactive slot, so this proves the layout/dm-verity-
   via-partition-device mechanics, not a real upgrade workflow.
-  Still open: `rootfs/init/main.go`'s `mountState` doesn't know how to
-  find the `STATE` partition (or which slot it booted from) on this
-  real single-disk layout yet - it still expects STATE as a separate
-  virtio-blk drive, which `hack/qemu-verity-boot-test.sh`/
-  `qemu-state-persist-test.sh` still provide (deliberately kept as-is -
-  they cover dm-verity tamper detection and STATE persistence, which
-  `qemu-ab-boot-test.sh` doesn't re-test). There's no udev on this
-  system, so no `/dev/disk/by-partlabel/*` to just read - finding STATE
-  robustly needs either a kernel cmdline convention the bootloader/UKI
-  sets, or a small amount of Go parsing the GPT table directly, given
-  init already knows (from its own cmdline) which disk root came from.
+  `rootfs/init/main.go`'s `mountState` now finds `STATE` on this real
+  single-disk layout too: `resolveStateDevice` (`rootfs/init/cmdline.go`)
+  parses init's own `/proc/cmdline` for the `dm-mod.create=` parameter
+  it already booted with (confirmed, by actually booting a debug init
+  and reading it back, that `/proc/cmdline` preserves the quotes
+  verbatim - not assumed from the kernel's own reformatted dmesg
+  "Command line:" line) and pulls out the verity target's data device.
+  If that device is itself a partition (e.g. `/dev/vda1` - ends in a
+  digit), `STATE` is derived by the fixed convention
+  `image/disk/assemble.sh`'s own layout uses: always partition 5 on
+  that same disk - no udev, no `/dev/disk/by-partlabel/*` needed, since
+  this project controls both ends (image assembly and init) and can fix
+  the convention rather than discover it generically. If the data
+  device is a bare whole-disk path instead (e.g. `/dev/vda`, no
+  partition number at all), that's `hack/qemu-verity-boot-test.sh`'s/
+  `qemu-state-persist-test.sh`'s older separate-virtio-blk-drives
+  harness - `resolveStateDevice` falls back to the original fixed
+  `/dev/vdc`, so those two tests keep working completely unchanged
+  (they're deliberately kept - they cover dm-verity tamper detection
+  and STATE persistence in isolation, which `qemu-ab-boot-test.sh`
+  doesn't re-test). `qemu-ab-boot-test.sh` now reboots slot A a second
+  time on the same disk and confirms haproxyosd's "first boot" line
+  does *not* reappear - proving `resolveStateDevice` actually works in
+  practice, not just via `cmdline_test.go`'s unit tests (which cover
+  the parsing itself, including the real cmdline string a boot produced
+  and several malformed/foreign ones, without needing a VM for each
+  case). The disk is no longer attached read-only in that test - only
+  dm-verity's own `ro` flag in `dm-mod.create=` needs to protect the
+  verity-mapped root, which it does regardless of the backing device's
+  own writability, so `STATE` (an ordinary, unprotected partition) can
+  be written to without weakening that.
   UEFI boot + a Unified Kernel Image is a bigger jump than it first
   looked: `CONFIG_EFI` (needed for `CONFIG_EFI_STUB`) `depends on
   CONFIG_ACPI`, and this kernel has never enabled ACPI at all - "UEFI

@@ -283,20 +283,23 @@ jobs:
       # hold the same content for now - no LifecycleService.Upgrade yet
       # to install something different into the inactive one. See
       # hack/qemu-ab-boot-test.sh.
+      # A third boot, back on slot A, proves rootfs/init/main.go's
+      # resolveStateDevice (cmdline.go) actually finds STATE (partition
+      # 5) on this real single-disk layout by parsing its own
+      # /proc/cmdline - haproxyosd's "first boot" log line must not
+      # reappear, since boot 1 already bootstrapped a CA there. See
+      # hack/qemu-ab-boot-test.sh's own comment for why the disk isn't
+      # attached read-only for this test (dm-verity's own "ro" flag
+      # already protects the root mapping regardless).
       - name: A/B disk image - both slots independently boot (Phase 3 cont'd)
         run: make qemu-ab-boot-test
 
-      # TODO(Phase 3 cont'd): rootfs/init/main.go's mountState still
-      # doesn't know how to find the STATE partition (or which slot it
-      # booted from) on a real single disk like image/disk/assemble.sh
-      # now builds - it still expects STATE as a separate virtio-blk
-      # drive. No udev here, so no /dev/disk/by-partlabel/* to just read
-      # - needs either a kernel cmdline convention the bootloader sets,
-      # or a small amount of Go parsing the GPT table directly. UEFI
-      # boot + Unified Kernel Image (needs ACPI - CONFIG_EFI depends on
-      # it, and this kernel has never enabled ACPI), Secure Boot
-      # signing, image/iso, image/kvm-proxmox, image/vmware,
-      # LifecycleService.Install/Upgrade/Rollback, upload artifacts to a
-      # GitHub Release.
+      # TODO(Phase 3 cont'd): UEFI boot + Unified Kernel Image (needs
+      # ACPI - CONFIG_EFI depends on it, and this kernel has never
+      # enabled ACPI), Secure Boot signing, image/iso, image/kvm-proxmox,
+      # image/vmware, LifecycleService.Install/Upgrade/Rollback (needs a
+      # real way to pick which A/B slot is "active" and write a new
+      # image into the inactive one - both slots are still identical,
+      # static content today), upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

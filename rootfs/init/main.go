@@ -87,16 +87,31 @@ func mountEphemeral() {
 // every boot) and applied config (or a live ApplyConfig RPC - which
 // just writes straight to /etc/haproxy/haproxy.cfg, see
 // internal/haproxy.Manager.Apply - is lost the moment the node
-// restarts). Expected as the third virtio-blk drive (after the
-// squashfs data and dm-verity hash tree drives - see
-// hack/qemu-verity-boot-test.sh vs hack/qemu-state-persist-test.sh for
-// the difference); unlike those two this one is writable, not
+// restarts). Unlike the root device, this one is writable, not
 // dm-verity-protected, since it's meant to be written to and
 // losing/corrupting it only costs state, not the system's integrity.
-// Not present in Phase 1/2's initramfs boots, or a verity boot without
-// a third drive attached - mount() fails harmlessly there (see its own
-// doc comment), leaving both directories on the ephemeral tmpfs
-// instead, same fallback behavior as before this existed.
+//
+// Where to find it depends on which of two shapes actually booted -
+// resolveStateDevice tells them apart by parsing /proc/cmdline's own
+// dm-mod.create= parameter (see cmdline.go), not a separate flag or
+// convention of its own:
+//   - the real, single GPT disk (image/disk/assemble.sh, booted by
+//     hack/qemu-ab-boot-test.sh): root's data device is a partition
+//     (e.g. /dev/vda1), and STATE is always partition 5 on that same
+//     disk, by image/disk/assemble.sh's own fixed layout.
+//   - the older separate-virtio-blk-drives harness
+//     (hack/qemu-verity-boot-test.sh, hack/qemu-state-persist-test.sh),
+//     which deliberately keeps working unchanged since it still covers
+//     things the single-disk test doesn't (dm-verity tamper detection,
+//     STATE persistence in isolation): root's data device is a whole
+//     disk (e.g. /dev/vda, no partition table at all), and STATE is a
+//     separate, fixed /dev/vdc drive.
+//
+// Not present at all in Phase 1/2's initramfs boots, or a verity boot
+// without the drive mountState resolves to actually attached - mount()
+// fails harmlessly there (see its own doc comment), leaving both
+// directories on the ephemeral tmpfs instead, same fallback behavior
+// as before this existed.
 func mountState() {
 	// Has to live inside the already-writable tmpfs /etc (mountEphemeral
 	// runs first, see main()), not some fresh top-level path like
@@ -107,7 +122,7 @@ func mountState() {
 	// past that failed MkdirAll silently no-op'd (mount()/bindMount()
 	// only log and return on error, never abort the boot).
 	const stateRoot = "/etc/.state"
-	mount("/dev/vdc", stateRoot, "ext4")
+	mount(resolveStateDevice(), stateRoot, "ext4")
 
 	// pki/: created with 0700 directly (matching
 	// internal/pki.LoadOrBootstrap's own intent) rather than mounting
@@ -161,6 +176,29 @@ func seedPersistentHaproxyCfg(dir string) {
 	if err := os.WriteFile(dst, cfgBytes, mode); err != nil {
 		fmt.Printf("init: write %s: %v\n", dst, err)
 	}
+}
+
+// resolveStateDevice figures out where the STATE partition/drive
+// actually is for *this* boot - see mountState's doc comment for the
+// two shapes it distinguishes between. Never fails outright: any
+// read/parse problem just falls back to the older separate-drive
+// convention, same as if this function didn't exist at all.
+func resolveStateDevice() string {
+	const fallback = "/dev/vdc" // hack/qemu-verity-boot-test.sh / hack/qemu-state-persist-test.sh's separate-drives harness
+	cmdline, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		fmt.Printf("init: read /proc/cmdline: %v\n", err)
+		return fallback
+	}
+	dataDev, ok := dmVerityDataDevice(string(cmdline))
+	if !ok {
+		return fallback
+	}
+	device, ok := statePartitionDevice(dataDev)
+	if !ok {
+		return fallback
+	}
+	return device
 }
 
 func bindMount(src, dst string) {
