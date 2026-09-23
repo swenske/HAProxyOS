@@ -155,7 +155,7 @@ plan - not implemented yet.
   Still open for Phase 1: real rootfs assembly beyond a single init binary
   (`rootfs/assemble.sh` still a stub) isn't needed yet either, since the
   initramfs *is* the whole rootfs for this boot-proof milestone.
-- **Phase 2** (essentially complete - one item left, see below): HAProxy
+- **Phase 2** (done): HAProxy
   integration (static musl build,
   supervised by `haproxyosd`), `HAProxyService`'s core RPCs implemented
   and reachable **inside the QEMU-booted kernel itself** - the kernel
@@ -183,12 +183,25 @@ plan - not implemented yet.
   all), and HAProxy's `set map` does **not** upsert - it errors on a
   missing key - so `MapUpdate`/`ACLUpdate`'s "set" path is really
   delete-then-add. `CertificateUpload`/`CertificateList`/
-  `CertificateDelete` manage HAProxy's in-memory certificate *store*
-  (`new`/`set`/`commit`/`del ssl cert`) - a freshly uploaded certificate
-  is loaded and inspectable but reports "Unused" until a `bind ... ssl
-  crt-list <list>` in the running config actually references it, which
-  `ApplyConfig` doesn't have first-class support for wiring up yet -
-  the one item Phase 2 still leaves open (see the roadmap note above).
+  `CertificateDelete` manage HAProxy's certificate *store*
+  (`new`/`set`/`commit`/`del ssl cert`) and - now, `CertificateUpload`'s
+  optional `crt_list`/`sni` fields - can also **bind** an uploaded cert
+  into a `crt-list` a running `bind ... ssl crt-list <path>` already
+  references (`add ssl crt-list`, with SNI filters), making it actually
+  reachable by TLS clients instead of just sitting in the store reporting
+  "Unused". `CertificateDelete`'s matching `crt_list` field unbinds
+  first - HAProxy refuses `del ssl cert` on anything still bound
+  ("in use, can't be deleted!"). One real constraint worth remembering:
+  HAProxy refuses to even **start** a `bind ... ssl crt-list <path>`
+  whose crt-list file is empty ("no SSL certificate specified") - a
+  crt-list-backed listener needs at least one seed certificate already
+  in the file at boot, uploaded certs are *additional* entries, not the
+  first one. Verified with real TLS handshakes, SNI included: uploaded +
+  bound a second certificate under a distinct SNI name, confirmed
+  `openssl s_client -servername <name>` gets that certificate while a
+  plain connection with no SNI still gets the original seed certificate,
+  then unbound + deleted it. This was the one Phase 2 gap left open
+  before - Phase 2 is now fully done.
 
   The other two gaps this phase had are closed:
 

@@ -39,3 +39,15 @@ func TestParseNotAfter_Missing(t *testing.T) {
 		t.Fatalf("expected empty string when notAfter is absent, got %q", got)
 	}
 }
+
+func TestParseCertField_Status(t *testing.T) {
+	if got := parseCertField([]byte(showSSLCertFixture), "Status"); got != "Unused" {
+		t.Fatalf("Status = %q, want %q", got, "Unused")
+	}
+}
+
+func TestParseCertField_Missing(t *testing.T) {
+	if got := parseCertField([]byte(showSSLCertFixture), "NoSuchField"); got != "" {
+		t.Fatalf("expected empty string for a missing field, got %q", got)
+	}
+}

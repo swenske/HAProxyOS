@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -103,8 +104,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy acl-add ACL VALUE           add one pattern value to ACL")
 	fmt.Fprintln(os.Stderr, "  haproxy acl-delete ACL VALUE        delete one pattern value from ACL")
 	fmt.Fprintln(os.Stderr, "  haproxy cert-list                   list certificates in HAProxy's cert store")
-	fmt.Fprintln(os.Stderr, "  haproxy cert-upload NAME FILE       upload/update a PEM cert+key bundle as NAME")
-	fmt.Fprintln(os.Stderr, "  haproxy cert-delete NAME             delete an unused certificate")
+	fmt.Fprintln(os.Stderr, "  haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE  upload a PEM cert+key bundle as NAME, optionally binding it into crt-list PATH")
+	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
 }
 
@@ -323,33 +324,47 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 			log.Fatalf("CertificateList: %v", err)
 		}
 		for _, cert := range resp.GetCertificates() {
-			fmt.Printf("%s\tnotAfter=%s\n", cert.GetName(), cert.GetNotAfter())
+			fmt.Printf("%s\tnotAfter=%s\tstatus=%s\n", cert.GetName(), cert.GetNotAfter(), cert.GetStatus())
 		}
 
 	case "cert-upload":
-		if len(args) != 3 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-upload NAME FILE")
+		fs := flag.NewFlagSet("haproxy cert-upload", flag.ExitOnError)
+		crtList := fs.String("crt-list", "", "bind into this crt-list (a 'bind ... ssl crt-list <path>' already in the running config) - leave empty to only upload, not bind")
+		sni := fs.String("sni", "", "comma-separated SNI names to scope the binding to (only meaningful with -crt-list)")
+		_ = fs.Parse(args[1:])
+		if fs.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE")
 			os.Exit(2)
 		}
-		data, err := os.ReadFile(args[2])
+		name, file := fs.Arg(0), fs.Arg(1)
+		data, err := os.ReadFile(file)
 		if err != nil {
-			log.Fatalf("read %s: %v", args[2], err)
+			log.Fatalf("read %s: %v", file, err)
+		}
+		var sniList []string
+		if *sni != "" {
+			sniList = strings.Split(*sni, ",")
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err = client.CertificateUpload(c, &haproxyosv1alpha1.CertificateUploadRequest{Name: args[1], PemBundle: data})
+		_, err = client.CertificateUpload(c, &haproxyosv1alpha1.CertificateUploadRequest{
+			Name: name, PemBundle: data, CrtList: *crtList, Sni: sniList,
+		})
 		if err != nil {
 			log.Fatalf("CertificateUpload: %v", err)
 		}
 
 	case "cert-delete":
-		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-delete NAME")
+		fs := flag.NewFlagSet("haproxy cert-delete", flag.ExitOnError)
+		crtList := fs.String("crt-list", "", "unbind from this crt-list before deleting - required if the certificate is still bound anywhere")
+		_ = fs.Parse(args[1:])
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-delete [-crt-list PATH] NAME")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.CertificateDelete(c, &haproxyosv1alpha1.CertificateDeleteRequest{Name: args[1]})
+		_, err := client.CertificateDelete(c, &haproxyosv1alpha1.CertificateDeleteRequest{Name: fs.Arg(0), CrtList: *crtList})
 		if err != nil {
 			log.Fatalf("CertificateDelete: %v", err)
 		}

@@ -1010,9 +1010,13 @@ func (x *CertificateListResponse) GetCertificates() []*CertificateInfo {
 }
 
 type CertificateInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	NotAfter      string                 `protobuf:"bytes,2,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"` // RFC3339
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Name     string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	NotAfter string                 `protobuf:"bytes,2,opt,name=not_after,json=notAfter,proto3" json:"not_after,omitempty"` // RFC3339
+	// "Used" or "Unused" - HAProxy's own status for this cert store entry
+	// (bound to a live crt-list, or not). Raw string, not an enum: it's
+	// display info, nothing branches on the exact value.
+	Status        string `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1061,10 +1065,24 @@ func (x *CertificateInfo) GetNotAfter() string {
 	return ""
 }
 
+func (x *CertificateInfo) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
 type CertificateUploadRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	PemBundle     []byte                 `protobuf:"bytes,2,opt,name=pem_bundle,json=pemBundle,proto3" json:"pem_bundle,omitempty"` // cert + key (+ chain), PEM-concatenated
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Name      string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	PemBundle []byte                 `protobuf:"bytes,2,opt,name=pem_bundle,json=pemBundle,proto3" json:"pem_bundle,omitempty"` // cert + key (+ chain), PEM-concatenated
+	// Optional: bind this certificate into crt_list (a `bind ... ssl
+	// crt-list <path>` file already referenced by the running config) as
+	// part of the same call, with an optional SNI filter. Leave crt_list
+	// empty to only upload into HAProxy's certificate store without
+	// binding it anywhere - matches the previous behavior.
+	CrtList       string   `protobuf:"bytes,3,opt,name=crt_list,json=crtList,proto3" json:"crt_list,omitempty"`
+	Sni           []string `protobuf:"bytes,4,rep,name=sni,proto3" json:"sni,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1113,9 +1131,29 @@ func (x *CertificateUploadRequest) GetPemBundle() []byte {
 	return nil
 }
 
+func (x *CertificateUploadRequest) GetCrtList() string {
+	if x != nil {
+		return x.CrtList
+	}
+	return ""
+}
+
+func (x *CertificateUploadRequest) GetSni() []string {
+	if x != nil {
+		return x.Sni
+	}
+	return nil
+}
+
 type CertificateDeleteRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Name  string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// Optional: unbind from crt_list before deleting. HAProxy refuses to
+	// delete a certificate still bound to any crt-list, so this must name
+	// every crt-list the certificate was added to (CertificateUpload only
+	// ever binds to one at a time, but nothing stops a caller from binding
+	// the same cert into more than one crt-list out of band).
+	CrtList       string `protobuf:"bytes,2,opt,name=crt_list,json=crtList,proto3" json:"crt_list,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1153,6 +1191,13 @@ func (*CertificateDeleteRequest) Descriptor() ([]byte, []int) {
 func (x *CertificateDeleteRequest) GetName() string {
 	if x != nil {
 		return x.Name
+	}
+	return ""
+}
+
+func (x *CertificateDeleteRequest) GetCrtList() string {
+	if x != nil {
+		return x.CrtList
 	}
 	return ""
 }
@@ -1222,16 +1267,20 @@ const file_haproxyos_v1alpha1_haproxy_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value\x12\x16\n" +
 	"\x06delete\x18\x03 \x01(\bR\x06delete\"b\n" +
 	"\x17CertificateListResponse\x12G\n" +
-	"\fcertificates\x18\x01 \x03(\v2#.haproxyos.v1alpha1.CertificateInfoR\fcertificates\"B\n" +
+	"\fcertificates\x18\x01 \x03(\v2#.haproxyos.v1alpha1.CertificateInfoR\fcertificates\"Z\n" +
 	"\x0fCertificateInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1b\n" +
-	"\tnot_after\x18\x02 \x01(\tR\bnotAfter\"M\n" +
+	"\tnot_after\x18\x02 \x01(\tR\bnotAfter\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\"z\n" +
 	"\x18CertificateUploadRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1d\n" +
 	"\n" +
-	"pem_bundle\x18\x02 \x01(\fR\tpemBundle\".\n" +
+	"pem_bundle\x18\x02 \x01(\fR\tpemBundle\x12\x19\n" +
+	"\bcrt_list\x18\x03 \x01(\tR\acrtList\x12\x10\n" +
+	"\x03sni\x18\x04 \x03(\tR\x03sni\"I\n" +
 	"\x18CertificateDeleteRequest\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name2\xe4\t\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x19\n" +
+	"\bcrt_list\x18\x02 \x01(\tR\acrtList2\xe4\t\n" +
 	"\x0eHAProxyService\x12J\n" +
 	"\tGetConfig\x12\x16.google.protobuf.Empty\x1a%.haproxyos.v1alpha1.GetConfigResponse\x12`\n" +
 	"\vApplyConfig\x12&.haproxyos.v1alpha1.ApplyConfigRequest\x1a'.haproxyos.v1alpha1.ApplyConfigResponse0\x01\x12g\n" +

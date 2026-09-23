@@ -131,13 +131,21 @@ jobs:
       # those). A previous haproxyosd instance's config didn't declare any
       # maps/ACLs (rootfs/base/etc/haproxy/haproxy.cfg is deliberately
       # minimal) - MapList/ACLUpdate only ever see *file-backed*
-      # maps/ACLs, so this step applies its own config with one of each.
+      # maps/ACLs, so this step applies its own config with one of each,
+      # plus an HTTPS frontend backed by a crt-list (seeded with one
+      # starter cert - HAProxy refuses to start a bind with an empty
+      # crt-list) to exercise CertificateUpload's -crt-list/-sni binding.
       - name: HAProxy runtime map/ACL/certificate test
         run: |
           set -euo pipefail
-          mkdir -p /tmp/rt-maps /tmp/rt-acls
+          mkdir -p /tmp/rt-maps /tmp/rt-acls /tmp/rt-certs
           echo "www.example.com backend1" > /tmp/rt-maps/hosts.map
           echo "1.2.3.4" > /tmp/rt-acls/blocked.acl
+
+          openssl req -x509 -newkey ed25519 -keyout /tmp/rt-certs/default.key -out /tmp/rt-certs/default.crt -days 1 -nodes -subj "/CN=default.local" 2>/dev/null
+          cat /tmp/rt-certs/default.crt /tmp/rt-certs/default.key > /tmp/rt-certs/default.pem
+          echo "/tmp/rt-certs/default.pem" > /tmp/rt-certs/crt-list.txt
+
           cat > /tmp/rt-haproxy.cfg <<'EOF'
           global
               stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
@@ -152,6 +160,9 @@ jobs:
               http-request deny if blocked
               http-request set-header X-Mapped %[req.hdr(host),map(/tmp/rt-maps/hosts.map,default)]
               http-request return status 200 content-type text/plain string "up\n"
+          frontend haproxyos-tls
+              bind *:8443 ssl crt-list /tmp/rt-certs/crt-list.txt
+              http-request return status 200 content-type text/plain string "tls-up\n"
           EOF
 
           sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
@@ -187,13 +198,30 @@ jobs:
           openssl req -x509 -newkey ed25519 -keyout /tmp/rt-cert.key -out /tmp/rt-cert.crt -days 1 -nodes -subj "/CN=rt.example.com" 2>/dev/null
           cat /tmp/rt-cert.crt /tmp/rt-cert.key > /tmp/rt-cert-bundle.pem
           ctl haproxy cert-upload /tmp/rt-uploaded.pem /tmp/rt-cert-bundle.pem
-          ctl haproxy cert-list | grep -q "^/tmp/rt-uploaded.pem"
+          ctl haproxy cert-list | grep -q "^/tmp/rt-uploaded.pem.*status=Unused"
           ctl haproxy cert-delete /tmp/rt-uploaded.pem
 
-      # TODO(Phase 2 cont'd): binding an uploaded certificate to a live
-      # listener via crt-list support in ApplyConfig - the last Phase 2
-      # item still open (restart-on-crash and chroot/uid privilege drop
-      # are both done, see docs/architecture.md).
+          # Now the actual crt-list binding: upload+bind with an SNI
+          # filter, confirm HAProxy serves it only for that SNI (a plain
+          # connection with no SNI must still get the seeded default
+          # cert), then unbind+delete.
+          openssl req -x509 -newkey ed25519 -keyout /tmp/rt-certs/uploaded.key -out /tmp/rt-certs/uploaded.crt -days 1 -nodes -subj "/CN=uploaded.local" 2>/dev/null
+          cat /tmp/rt-certs/uploaded.crt /tmp/rt-certs/uploaded.key > /tmp/rt-certs/uploaded.pem
+          ctl haproxy cert-upload -crt-list /tmp/rt-certs/crt-list.txt -sni uploaded.local \
+            /tmp/rt-certs/uploaded.pem /tmp/rt-certs/uploaded.pem
+          ctl haproxy cert-list | grep -q "^/tmp/rt-certs/uploaded.pem.*status=Used"
+
+          got="$(openssl s_client -connect 127.0.0.1:8443 -servername uploaded.local </dev/null 2>/dev/null | grep subject=)"
+          [ "$got" = "subject=CN=uploaded.local" ] || { echo "expected the SNI-bound cert, got: $got" >&2; exit 1; }
+          got="$(openssl s_client -connect 127.0.0.1:8443 </dev/null 2>/dev/null | grep subject=)"
+          [ "$got" = "subject=CN=default.local" ] || { echo "expected the default cert with no SNI, got: $got" >&2; exit 1; }
+
+          ctl haproxy cert-delete -crt-list /tmp/rt-certs/crt-list.txt /tmp/rt-certs/uploaded.pem
+          ctl haproxy cert-list | grep -q "^/tmp/rt-certs/uploaded.pem" && { echo "expected the cert to be gone after delete" >&2; exit 1; } || true
+
+      # Phase 2 is now fully done (see docs/architecture.md): HAProxy
+      # integration, mTLS + role enforcement, Map*/ACLUpdate/Certificate*
+      # including crt-list binding, restart-on-crash, chroot/uid.
       # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
       # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
       # upload artifacts to a GitHub Release.

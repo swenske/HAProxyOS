@@ -83,7 +83,7 @@ are also technically non-mutating).
 | `ServerSetState` | | ✅ | Runtime enable/drain/maint a backend server |
 | `MapList` / `MapGet` / `MapUpdate` | | ✅ | Runtime maps - file-backed only (`map(<path>)` in the running config); upsert is delete-then-add since `set map` doesn't create missing keys |
 | `ACLUpdate` | | ✅ | Runtime ACL pattern values - file-backed only (`acl ... -f <path>`), same delete-then-add upsert reasoning |
-| `CertificateList` / `Upload` / `Delete` | | ✅ | HAProxy's in-memory cert store (`new`/`set`/`commit`/`del ssl cert`) - manages the store, doesn't yet bind a cert to a listener (needs `crt-list` support in `ApplyConfig`'s config text, not implemented) |
+| `CertificateList` / `Upload` / `Delete` | | ✅ | HAProxy's cert store (`new`/`set`/`commit`/`del ssl cert`), plus optional binding into a `crt-list` already referenced by a `bind ... ssl crt-list <path>` in the running config (`add`/`del ssl crt-list`, with SNI filters) - `CertificateList` reports each cert's `Used`/`Unused` status |
 
 ## NetworkService (optional modules)
 

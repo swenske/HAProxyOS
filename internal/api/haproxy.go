@@ -131,20 +131,20 @@ func (h *HAProxy) CertificateList(_ context.Context, _ *emptypb.Empty) (*haproxy
 	}
 	resp := &haproxyosv1alpha1.CertificateListResponse{}
 	for _, c := range certs {
-		resp.Certificates = append(resp.Certificates, &haproxyosv1alpha1.CertificateInfo{Name: c.Name, NotAfter: c.NotAfter})
+		resp.Certificates = append(resp.Certificates, &haproxyosv1alpha1.CertificateInfo{Name: c.Name, NotAfter: c.NotAfter, Status: c.Status})
 	}
 	return resp, nil
 }
 
 func (h *HAProxy) CertificateUpload(_ context.Context, req *haproxyosv1alpha1.CertificateUploadRequest) (*emptypb.Empty, error) {
-	if err := h.Manager.CertificateUpload(req.GetName(), req.GetPemBundle()); err != nil {
+	if err := h.Manager.CertificateUpload(req.GetName(), req.GetPemBundle(), req.GetCrtList(), req.GetSni()); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil
 }
 
 func (h *HAProxy) CertificateDelete(_ context.Context, req *haproxyosv1alpha1.CertificateDeleteRequest) (*emptypb.Empty, error) {
-	if err := h.Manager.CertificateDelete(req.GetName()); err != nil {
+	if err := h.Manager.CertificateDelete(req.GetName(), req.GetCrtList()); err != nil {
 		return nil, err
 	}
 	return &emptypb.Empty{}, nil

@@ -145,13 +145,31 @@ message CertificateListResponse {
 message CertificateInfo {
   string name = 1;
   string not_after = 2; // RFC3339
+  // "Used" or "Unused" - HAProxy's own status for this cert store entry
+  // (bound to a live crt-list, or not). Raw string, not an enum: it's
+  // display info, nothing branches on the exact value.
+  string status = 3;
 }
 
 message CertificateUploadRequest {
   string name = 1;
   bytes pem_bundle = 2; // cert + key (+ chain), PEM-concatenated
+
+  // Optional: bind this certificate into crt_list (a `bind ... ssl
+  // crt-list <path>` file already referenced by the running config) as
+  // part of the same call, with an optional SNI filter. Leave crt_list
+  // empty to only upload into HAProxy's certificate store without
+  // binding it anywhere - matches the previous behavior.
+  string crt_list = 3;
+  repeated string sni = 4;
 }
 
 message CertificateDeleteRequest {
   string name = 1;
+  // Optional: unbind from crt_list before deleting. HAProxy refuses to
+  // delete a certificate still bound to any crt-list, so this must name
+  // every crt-list the certificate was added to (CertificateUpload only
+  // ever binds to one at a time, but nothing stops a caller from binding
+  // the same cert into more than one crt-list out of band).
+  string crt_list = 2;
 }
