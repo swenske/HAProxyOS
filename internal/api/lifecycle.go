@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -65,7 +66,11 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 	if err := syscall.Mount(espDev, espMountpoint, "vfat", 0, ""); err != nil {
 		return nil, status.Errorf(codes.Internal, "mount ESP %s: %v", espDev, err)
 	}
-	defer syscall.Unmount(espMountpoint, 0)
+	defer func() {
+		if err := syscall.Unmount(espMountpoint, 0); err != nil {
+			log.Printf("lifecycle: unmount %s: %v", espMountpoint, err)
+		}
+	}()
 
 	src := filepath.Join(espMountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", target))
 	staged, err := os.ReadFile(src)
@@ -84,7 +89,9 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 	go func() {
 		time.Sleep(2 * time.Second)
 		syscall.Sync()
-		syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		if err := syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART); err != nil {
+			log.Printf("lifecycle: reboot: %v", err)
+		}
 	}()
 
 	return &haproxyosv1alpha1.RollbackResponse{ActiveSlot: target}, nil
