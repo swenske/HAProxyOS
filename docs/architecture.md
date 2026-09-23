@@ -326,13 +326,29 @@ plan - not implemented yet.
   HAProxy startup, config read) genuinely works from a dm-verity-booted,
   read-only node, not just that the kernel got as far as running
   `/sbin/init`.
-  Still open: **none of this survives a reboot** - the tmpfs layer is
-  wiped every time, so a fresh CA/admin cert gets generated on every
-  boot and any `ApplyConfig` change is lost. A real persistent STATE
-  partition for `/etc/haproxyos/pki` (and, later, applied config) is
-  still a separate, unbuilt piece - along with A/B partitioning, UEFI +
-  a Unified Kernel Image, Secure Boot signing, and the `LifecycleService`
-  RPCs to drive an actual install/upgrade/rollback.
+  A real persistent STATE partition now backs `/etc/haproxyos/pki`
+  specifically: `rootfs/state-image.sh` pre-formats a small, blank ext4
+  image at **build time** (`mkfs.ext4` - no mkfs binary ships on the
+  target, matching the "no package manager on the node" rule; needed
+  `CONFIG_EXT4_FS` in the kernel, pulled in cleanly via `select` with no
+  gating-menu surprise this time), and `rootfs/init/main.go`'s new
+  `mountState` mounts it - read-write, *not* dm-verity-protected, since
+  it's meant to be written to - over `/etc/haproxyos/pki` as a third
+  virtio-blk drive, after `mountEphemeral` has already put a tmpfs at
+  `/etc`. `cmd/haproxyosd`'s PKI bootstrap now calls `syscall.Sync()`
+  right after writing the CA/certs, so durability doesn't depend on
+  QEMU's own shutdown-time cache flush. Proven with a real two-boot
+  test (`hack/qemu-state-persist-test.sh`, not just "the mount didn't
+  error"): boots the *same* `state.img` twice - the first boot must log
+  haproxyosd's "first boot - generated a new CA" line, the second must
+  not, `internal/pki.LoadOrBootstrap` finding and loading the CA
+  written by the first boot instead of generating a new one.
+  Still open: applied config (`ApplyConfig`) still doesn't survive a
+  reboot - only `/etc/haproxyos/pki` lives on the STATE partition so
+  far, everything else under `/etc` is still the plain `mountEphemeral`
+  tmpfs. That, plus A/B partitioning, UEFI + a Unified Kernel Image,
+  Secure Boot signing, and the `LifecycleService` RPCs to drive an
+  actual install/upgrade/rollback, are still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

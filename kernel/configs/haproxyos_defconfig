@@ -50,6 +50,14 @@
 #   # function (-2)").
 #   CONFIG_CRYPTO_SHA256=y
 #
+#   # persistent STATE partition (Phase 3 cont'd: /etc/haproxyos/pki
+#   # needs to survive a reboot, unlike rootfs/init's tmpfs-backed
+#   # ephemeral overlay) - a third virtio-blk drive, pre-formatted at
+#   # build time (no mkfs on the target, matching the "no package
+#   # manager" rule), mounted directly (no dm-verity: this one is meant
+#   # to be written to).
+#   CONFIG_EXT4_FS=y
+#
 # Deliberately the FULL resolved config (every symbol explicit), not a
 # compact savedefconfig diff: a diff format resolves unlisted symbols
 # against the kernel's own defconfig-derived defaults, which would
@@ -1894,8 +1902,16 @@ CONFIG_CLKBLD_I8253=y
 CONFIG_DCACHE_WORD_ACCESS=y
 # CONFIG_VALIDATE_FS_PARSER is not set
 CONFIG_FS_IOMAP=y
+CONFIG_BUFFER_HEAD=y
 # CONFIG_EXT2_FS is not set
-# CONFIG_EXT4_FS is not set
+CONFIG_EXT4_FS=y
+CONFIG_EXT4_USE_FOR_EXT2=y
+# CONFIG_EXT4_FS_POSIX_ACL is not set
+# CONFIG_EXT4_FS_SECURITY is not set
+# CONFIG_EXT4_DEBUG is not set
+CONFIG_JBD2=y
+# CONFIG_JBD2_DEBUG is not set
+CONFIG_FS_MBCACHE=y
 # CONFIG_JFS_FS is not set
 # CONFIG_XFS_FS is not set
 # CONFIG_GFS2_FS is not set
@@ -2305,6 +2321,7 @@ CONFIG_GENERIC_IOMAP=y
 CONFIG_ARCH_USE_CMPXCHG_LOCKREF=y
 CONFIG_ARCH_HAS_FAST_MULTIPLIER=y
 CONFIG_ARCH_USE_SYM_ANNOTATIONS=y
+CONFIG_CRC16=y
 CONFIG_CRC32=y
 CONFIG_CRC32_ARCH=y
 CONFIG_CRC_OPTIMIZATIONS=y

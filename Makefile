@@ -13,7 +13,7 @@ GEN_DIR := gen
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
 	kernel-build init initramfs qemu-boot-test haproxy-build \
 	daemon-static initramfs-full qemu-network-test rootfs-build \
-	qemu-verity-boot-test
+	qemu-verity-boot-test state-image qemu-state-persist-test
 
 all: build
 
@@ -147,3 +147,24 @@ rootfs-build: init daemon-static haproxy-build
 # table's fields are derived from rootfs.verity.info.
 qemu-verity-boot-test: kernel-build rootfs-build
 	./hack/qemu-verity-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 3 cont'd: builds a blank, pre-formatted ext4 image for the
+# persistent STATE partition (currently just /etc/haproxyos/pki - the
+# one thing rootfs/init/main.go's ephemeral tmpfs overlay can't be
+# allowed to wipe every boot) - formatted here, at build time, not on
+# the target (see rootfs/state-image.sh for why). Requires mkfs.ext4
+# (e2fsprogs) - doesn't need root. Small: PKI is a handful of small PEM
+# files.
+STATE_IMAGE_MB := 16
+state-image:
+	mkdir -p $(BUILD_DIR)/rootfs
+	./rootfs/state-image.sh $(BUILD_DIR)/rootfs/state.img $(STATE_IMAGE_MB)
+
+# Phase 3 cont'd: proves the STATE partition actually persists across a
+# reboot, not just that it can be mounted - boots the same dm-verity
+# image twice against the *same* state.img (a third, writable virtio-blk
+# drive, unlike the two read-only root drives), and checks haproxyosd's
+# own "first boot" log line appears on the first boot and does NOT
+# reappear on the second - see hack/qemu-state-persist-test.sh.
+qemu-state-persist-test: kernel-build rootfs-build state-image
+	./hack/qemu-state-persist-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img

@@ -1,6 +1,7 @@
 // Command init is HAProxyOS's PID 1. It mounts proc/sysfs/devtmpfs,
-// sets up an ephemeral tmpfs writable layer (see mountEphemeral), prints
-// a fixed success marker that hack/qemu-run.sh greps for, then:
+// sets up an ephemeral tmpfs writable layer (see mountEphemeral) and the
+// persistent STATE partition (see mountState), prints a fixed success
+// marker that hack/qemu-run.sh greps for, then:
 //   - if /sbin/haproxyosd is present in the initramfs, starts it under a
 //     Supervisor (see supervisor.go) that restarts it - with a growing,
 //     capped backoff - every time it exits, forever. There's no give-up
@@ -36,23 +37,22 @@ func mount(source, target, fstype string) {
 
 // mountEphemeral gives the otherwise fully read-only (Phase 3: dm-verity
 // verified) root a writable layer, entirely tmpfs-backed - nothing here
-// survives a reboot yet, that needs a real persistent STATE partition
-// (still not built, see docs/architecture.md's Phase 3 notes). /run and
-// /tmp are mounted empty - nothing pre-existing there needs to survive
-// the overmount (haproxyosd's /run/haproxyos, HAProxy's stats socket/pid
-// file, Manager.Validate's tmpfile). /etc needs its own handling since
-// it isn't empty on a freshly-booted node: rootfs/base/etc/haproxy/
-// haproxy.cfg (the bootstrap default config) lives on the squashfs and
-// would otherwise vanish under a plain tmpfs mount, so its bytes are
-// read *before* the overmount and rewritten into the new tmpfs - this
-// is what makes both PKI bootstrap (/etc/haproxyos/pki) and a live
-// ApplyConfig RPC (which writes to this same path) actually work on a
-// dm-verity-booted node; before this, haproxyosd crash-looped forever
-// on "read-only file system" trying to create either. /var is left
-// alone (still squashfs-backed): the only thing under it is /var/empty,
-// HAProxy's chroot jail, which must keep the exact immutable mode-0000
-// baked into the image by rootfs/assemble.sh, not a fresh writable one
-// recreated here.
+// survives a reboot (see mountState for the one directory that does).
+// /run and /tmp are mounted empty - nothing pre-existing there needs to
+// survive the overmount (haproxyosd's /run/haproxyos, HAProxy's stats
+// socket/pid file, Manager.Validate's tmpfile). /etc needs its own
+// handling since it isn't empty on a freshly-booted node: rootfs/base/
+// etc/haproxy/haproxy.cfg (the bootstrap default config) lives on the
+// squashfs and would otherwise vanish under a plain tmpfs mount, so its
+// bytes are read *before* the overmount and rewritten into the new
+// tmpfs - this is what makes both PKI bootstrap (/etc/haproxyos/pki,
+// see mountState) and a live ApplyConfig RPC (which writes to this same
+// path) actually work on a dm-verity-booted node; before this,
+// haproxyosd crash-looped forever on "read-only file system" trying to
+// create either. /var is left alone (still squashfs-backed): the only
+// thing under it is /var/empty, HAProxy's chroot jail, which must keep
+// the exact immutable mode-0000 baked into the image by rootfs/
+// assemble.sh, not a fresh writable one recreated here.
 func mountEphemeral() {
 	mount("tmpfs", "/run", "tmpfs")
 	mount("tmpfs", "/tmp", "tmpfs")
@@ -79,11 +79,36 @@ func mountEphemeral() {
 	}
 }
 
+// mountState mounts the pre-formatted, persistent STATE partition (see
+// rootfs/state-image.sh) over /etc/haproxyos/pki, the one thing from
+// mountEphemeral's ephemeral overlay that actually needs to survive a
+// reboot - without it, a fresh CA/admin cert gets generated on every
+// boot. Expected as the third virtio-blk drive (after the squashfs data
+// and dm-verity hash tree drives - see hack/qemu-verity-boot-test.sh vs
+// hack/qemu-state-persist-test.sh for the difference), unlike those two
+// this one is writable, not dm-verity-protected: it's meant to be
+// written to, and losing/corrupting it only costs PKI state, not the
+// system's integrity. Not present in Phase 1/2's initramfs boots, or a
+// verity boot without a third drive attached - mount() fails harmlessly
+// there (see its own doc comment), leaving /etc/haproxyos/pki on the
+// ephemeral tmpfs instead, same fallback behavior as before this
+// existed. The explicit chmod matches internal/pki.LoadOrBootstrap's
+// own intent (0700, not whatever mode mkfs.ext4 gives a fresh
+// filesystem's root directory).
+func mountState() {
+	const dir = "/etc/haproxyos/pki"
+	mount("/dev/vdc", dir, "ext4")
+	if err := os.Chmod(dir, 0o700); err != nil {
+		fmt.Printf("init: chmod %s: %v\n", dir, err)
+	}
+}
+
 func main() {
 	mount("proc", "/proc", "proc")
 	mount("sysfs", "/sys", "sysfs")
 	mount("devtmpfs", "/dev", "devtmpfs")
 	mountEphemeral()
+	mountState()
 
 	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
 	if err != nil {

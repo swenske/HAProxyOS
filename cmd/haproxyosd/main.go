@@ -23,6 +23,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"syscall"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -65,6 +66,12 @@ func main() {
 	if pkiBootstrap.AdminIssued {
 		log.Printf("pki: first boot - generated a new CA and admin client certificate in %s", *pkiDir)
 		log.Printf("pki: ADMIN CERTIFICATE (save this now, it will not be printed again):\n%s%s", pkiBootstrap.AdminCertPEM, pkiBootstrap.AdminKeyPEM)
+		// pkiDir may be the Phase 3 cont'd persistent STATE partition
+		// (see rootfs/init/main.go's mountState) - force these bytes to
+		// the underlying block device now rather than trusting they're
+		// still there if the node loses power before some later,
+		// unrelated sync happens to occur.
+		syscall.Sync()
 	}
 
 	lis, err := net.Listen("tcp", *addr)
