@@ -49,13 +49,28 @@ func dmVerityDataDevice(cmdline string) (string, bool) {
 // statePartitionDevice derives the STATE partition's device path from
 // the root verity data device, by the fixed convention
 // image/disk/assemble.sh's own GPT layout uses: STATE is always
-// partition 5 on the same disk BOOT-A/BOOT-B live on. Only applies when
-// dataDev is itself a partition (ends in a digit, e.g. "/dev/vda1" -
-// the real, single-disk layout); returns ok=false for a bare
-// whole-disk device (e.g. "/dev/vda" - hack/qemu-verity-boot-test.sh's
-// and hack/qemu-state-persist-test.sh's separate-virtio-blk-drives
-// harness, which has no partition table on the root device at all, and
+// partition 6 on the same disk ESP/BOOT-A/BOOT-B live on (1:ESP,
+// 2:BOOT-A-DATA, 3:BOOT-A-HASH, 4:BOOT-B-DATA, 5:BOOT-B-HASH, 6:STATE -
+// a real single-disk-with-ESP boot means dataDev is /dev/vda2 or
+// /dev/vda4, never /dev/vda1 itself). Only applies when dataDev is
+// itself a partition (ends in a digit, e.g. "/dev/vda2" - the real,
+// single-disk layout); returns ok=false for a bare whole-disk device
+// (e.g. "/dev/vda" - hack/qemu-verity-boot-test.sh's and
+// hack/qemu-state-persist-test.sh's separate-virtio-blk-drives harness,
+// which has no partition table on the root device at all, and
 // deliberately keeps working that way - see mountState's doc comment).
+//
+// The partition number 6 was wrong here once already - image/disk/
+// assemble.sh grew an ESP as partition 1 without this constant being
+// updated to match, silently mounting BOOT-B-HASH (an ext4 mount on a
+// dm-verity hash tree, not a real filesystem) as if it were STATE.
+// mount() only logs and falls back on a bad mount, so the failure mode
+// wasn't a crash - it was PKI silently regenerating every boot again,
+// exactly like the very first version of this bug (see mountState's
+// own doc comment history). Caught by actually rebooting into slot B
+// after switching to it and watching "first boot" reappear when it
+// shouldn't have - see hack/qemu-uefi-ab-boot-test.sh, which exists
+// specifically to keep re-catching this class of bug.
 func statePartitionDevice(dataDev string) (string, bool) {
 	i := len(dataDev)
 	for i > 0 && dataDev[i-1] >= '0' && dataDev[i-1] <= '9' {
@@ -68,6 +83,6 @@ func statePartitionDevice(dataDev string) (string, bool) {
 	if disk == "" {
 		return "", false
 	}
-	const statePartitionNumber = "5" // image/disk/assemble.sh: partition 5 is always STATE
+	const statePartitionNumber = "6" // image/disk/assemble.sh: partition 6 is always STATE
 	return disk + statePartitionNumber, true
 }

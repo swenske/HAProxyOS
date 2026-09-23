@@ -4,12 +4,12 @@
 # looks right. Boots the SAME disk.img twice, attached as ONE virtio-blk
 # drive (unlike hack/qemu-verity-boot-test.sh's separate-drives harness):
 # once with the kernel's "dm-mod.create=" cmdline pointed at
-# BOOT-A-DATA/BOOT-A-HASH (partitions 1/2 - /dev/vda1, /dev/vda2, GPT
-# scanning via CONFIG_EFI_PARTITION, already on unconditionally by
-# default - no separate "enable GPT" kernel config needed), once at
-# BOOT-B-DATA/BOOT-B-HASH (partitions 3/4 - /dev/vda3, /dev/vda4). Both
-# boots must serve real HTTP, same as qemu-verity-boot-test.sh's own
-# "good" boot.
+# BOOT-A-DATA/BOOT-A-HASH (partitions 2/3 - /dev/vda2, /dev/vda3; ESP is
+# partition 1, GPT scanning via CONFIG_EFI_PARTITION, already on
+# unconditionally by default - no separate "enable GPT" kernel config
+# needed), once at BOOT-B-DATA/BOOT-B-HASH (partitions 4/5 - /dev/vda4,
+# /dev/vda5). Both boots must serve real HTTP, same as
+# qemu-verity-boot-test.sh's own "good" boot.
 #
 # Both slots hold the same content today (see image/disk/assemble.sh -
 # there's no LifecycleService.Upgrade yet to install something
@@ -18,11 +18,11 @@
 # either slot, not a real upgrade/rollback workflow.
 #
 # A third boot, back on slot A, then proves rootfs/init/main.go's
-# resolveStateDevice (cmdline.go) correctly finds STATE (partition 5)
+# resolveStateDevice (cmdline.go) correctly finds STATE (partition 6)
 # on *this* real single-disk layout, not just the older separate-drive
 # one hack/qemu-state-persist-test.sh already covers: haproxyosd's
 # "first boot" log line must NOT reappear, since boot 1 already
-# bootstrapped a CA onto partition 5 - internal/pki.LoadOrBootstrap
+# bootstrapped a CA onto partition 6 - internal/pki.LoadOrBootstrap
 # should find and load it instead. The disk isn't attached read-only
 # for this reason: dm-verity's own "ro" flag in dm-mod.create= already
 # protects the verity-mapped root regardless of whether the underlying
@@ -89,8 +89,8 @@ boot_slot() {
 FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 A_LOG="$WORKDIR/slot-a.log"
-if ! boot_slot /dev/vda1 /dev/vda2 "$A_LOG"; then
-  echo "A/B boot test FAILED: slot A (BOOT-A-DATA/BOOT-A-HASH, /dev/vda1+2) never answered HTTP 200 within ${HTTP_TIMEOUT_SECS}s" >&2
+if ! boot_slot /dev/vda2 /dev/vda3 "$A_LOG"; then
+  echo "A/B boot test FAILED: slot A (BOOT-A-DATA/BOOT-A-HASH, /dev/vda2+3) never answered HTTP 200 within ${HTTP_TIMEOUT_SECS}s" >&2
   echo "--- console output ---" >&2
   cat "$A_LOG" >&2
   exit 1
@@ -101,30 +101,30 @@ if ! grep -q "$FIRST_BOOT_MSG" "$A_LOG"; then
   cat "$A_LOG" >&2
   exit 1
 fi
-echo "Slot A OK: HAProxy answered HTTP 200, booted from BOOT-A-DATA/BOOT-A-HASH (/dev/vda1+2), bootstrapped a new CA onto STATE"
+echo "Slot A OK: HAProxy answered HTTP 200, booted from BOOT-A-DATA/BOOT-A-HASH (/dev/vda2+3), bootstrapped a new CA onto STATE"
 
 B_LOG="$WORKDIR/slot-b.log"
-if ! boot_slot /dev/vda3 /dev/vda4 "$B_LOG"; then
-  echo "A/B boot test FAILED: slot B (BOOT-B-DATA/BOOT-B-HASH, /dev/vda3+4) never answered HTTP 200 within ${HTTP_TIMEOUT_SECS}s" >&2
+if ! boot_slot /dev/vda4 /dev/vda5 "$B_LOG"; then
+  echo "A/B boot test FAILED: slot B (BOOT-B-DATA/BOOT-B-HASH, /dev/vda4+5) never answered HTTP 200 within ${HTTP_TIMEOUT_SECS}s" >&2
   echo "--- console output ---" >&2
   cat "$B_LOG" >&2
   exit 1
 fi
-echo "Slot B OK: HAProxy answered HTTP 200, booted from BOOT-B-DATA/BOOT-B-HASH (/dev/vda3+4)"
+echo "Slot B OK: HAProxy answered HTTP 200, booted from BOOT-B-DATA/BOOT-B-HASH (/dev/vda4+5)"
 
 A2_LOG="$WORKDIR/slot-a-2.log"
-if ! boot_slot /dev/vda1 /dev/vda2 "$A2_LOG"; then
+if ! boot_slot /dev/vda2 /dev/vda3 "$A2_LOG"; then
   echo "A/B boot test FAILED: slot A's second boot never answered HTTP 200 within ${HTTP_TIMEOUT_SECS}s" >&2
   echo "--- console output ---" >&2
   cat "$A2_LOG" >&2
   exit 1
 fi
 if grep -q "$FIRST_BOOT_MSG" "$A2_LOG"; then
-  echo "A/B boot test FAILED: slot A's second boot logged '$FIRST_BOOT_MSG' again - resolveStateDevice isn't finding STATE (partition 5) on this real single-disk layout" >&2
+  echo "A/B boot test FAILED: slot A's second boot logged '$FIRST_BOOT_MSG' again - resolveStateDevice isn't finding STATE (partition 6) on this real single-disk layout" >&2
   echo "--- console output ---" >&2
   cat "$A2_LOG" >&2
   exit 1
 fi
-echo "Slot A (2nd boot) OK: loaded the CA from STATE instead of regenerating it - resolveStateDevice finds partition 5 correctly"
+echo "Slot A (2nd boot) OK: loaded the CA from STATE instead of regenerating it - resolveStateDevice finds partition 6 correctly"
 
 echo "A/B boot test OK: both slots of the single GPT disk image are independently bootable, and STATE persists across a reboot on this real layout"

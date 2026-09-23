@@ -14,7 +14,8 @@ GEN_DIR := gen
 	kernel-build init initramfs qemu-boot-test haproxy-build \
 	daemon-static initramfs-full qemu-network-test rootfs-build \
 	qemu-verity-boot-test state-image qemu-state-persist-test \
-	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test
+	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
+	qemu-uefi-ab-boot-test
 
 all: build
 
@@ -170,27 +171,43 @@ state-image:
 qemu-state-persist-test: kernel-build rootfs-build state-image
 	./hack/qemu-state-persist-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img
 
-# Phase 3 cont'd: assembles a single, real GPT-partitioned disk image
-# with two independently bootable A/B slots (BOOT-A-DATA/HASH,
-# BOOT-B-DATA/HASH - both slots get the same content for now, there's
-# no LifecycleService.Upgrade yet to install something different into
-# the inactive one) plus the STATE partition - the real, single-disk
-# shape a deployed node would actually have, as opposed to
+# Phase 3 cont'd: assembles a single, real GPT-partitioned disk image -
+# the actual, complete shape a deployed node would have: an ESP (with
+# the active slot's Unified Kernel Image at \EFI\BOOT\BOOTX64.EFI),
+# two independently bootable A/B slots (BOOT-A-DATA/HASH,
+# BOOT-B-DATA/HASH - both slots get the same rootfs content for now,
+# there's no LifecycleService.Upgrade yet to install something
+# different into the inactive one), and STATE. As opposed to
 # qemu-verity-boot-test/qemu-state-persist-test's separate-virtio-blk-
 # drives harness (which keeps working, and still covers what it always
-# covered). Requires sgdisk (gdisk) - doesn't need root. See
-# image/disk/assemble.sh.
-disk-image: rootfs-build state-image
-	./image/disk/assemble.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img
+# covered). Requires sgdisk (gdisk), ukify (systemd-ukify),
+# mtools/dosfstools - doesn't need root. See image/disk/assemble.sh and
+# image/disk/activate-slot.sh (switches which slot's UKI is on the ESP,
+# in place, without touching STATE or either slot's content - the
+# groundwork for a real LifecycleService.Upgrade/Rollback).
+disk-image: kernel-build rootfs-build state-image
+	./image/disk/assemble.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage \
+		$(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img A
 
 # Phase 3 cont'd: proves both A/B slots of disk-image's single GPT disk
-# are actually, independently bootable - not just that the partition
-# table looks right. Boots the SAME disk image twice, once with
-# dm-mod.create= pointed at BOOT-A-DATA/BOOT-A-HASH (partitions 1/2),
-# once at BOOT-B-DATA/BOOT-B-HASH (partitions 3/4); both must serve real
-# HTTP. See hack/qemu-ab-boot-test.sh.
+# are actually, independently bootable via QEMU's own -kernel/-append
+# (not through the ESP/UKI - see qemu-uefi-ab-boot-test for that) - not
+# just that the partition table looks right. Boots the SAME disk image
+# twice, once with dm-mod.create= pointed at BOOT-A-DATA/BOOT-A-HASH
+# (partitions 2/3), once at BOOT-B-DATA/BOOT-B-HASH (partitions 4/5);
+# both must serve real HTTP. See hack/qemu-ab-boot-test.sh.
 qemu-ab-boot-test: kernel-build disk-image
 	./hack/qemu-ab-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 3 cont'd: proves the *whole* real, single-disk, UEFI-bootable
+# shape end to end - real OVMF firmware, one virtio-blk drive, no
+# -kernel/-append at all - and that image/disk/activate-slot.sh's
+# in-place ESP swap actually works: boot slot A (fresh CA onto STATE),
+# switch the ESP to slot B in place, boot again, and confirm slot B is
+# now what's live *and* that STATE (the CA from the slot A boot)
+# survived the switch untouched. See hack/qemu-uefi-ab-boot-test.sh.
+qemu-uefi-ab-boot-test: disk-image
+	./hack/qemu-uefi-ab-boot-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`

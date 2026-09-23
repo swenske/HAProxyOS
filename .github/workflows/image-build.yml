@@ -286,40 +286,58 @@ jobs:
       # hack/qemu-ab-boot-test.sh.
       # A third boot, back on slot A, proves rootfs/init/main.go's
       # resolveStateDevice (cmdline.go) actually finds STATE (partition
-      # 5) on this real single-disk layout by parsing its own
-      # /proc/cmdline - haproxyosd's "first boot" log line must not
-      # reappear, since boot 1 already bootstrapped a CA there. See
-      # hack/qemu-ab-boot-test.sh's own comment for why the disk isn't
-      # attached read-only for this test (dm-verity's own "ro" flag
-      # already protects the root mapping regardless).
+      # 6 - image/disk/assemble.sh now has an ESP as partition 1 too,
+      # ahead of both A/B slots) on this real single-disk layout by
+      # parsing its own /proc/cmdline - haproxyosd's "first boot" log
+      # line must not reappear, since boot 1 already bootstrapped a CA
+      # there. See hack/qemu-ab-boot-test.sh's own comment for why the
+      # disk isn't attached read-only for this test (dm-verity's own
+      # "ro" flag already protects the root mapping regardless).
       - name: A/B disk image - both slots independently boot (Phase 3 cont'd)
         run: make qemu-ab-boot-test
 
       # Phase 3 cont'd: assembles a real Unified Kernel Image (`ukify` -
       # kernel + exact cmdline, one PE/COFF executable) and a FAT32 ESP
       # with it at \EFI\BOOT\BOOTX64.EFI, then boots it under *real*
-      # OVMF UEFI firmware - no QEMU -kernel/-append shortcut at all,
-      # unlike every other boot test above. Needed CONFIG_ACPI in the
-      # kernel for the first time (CONFIG_EFI depends on it) plus
-      # CONFIG_EFI/CONFIG_EFI_STUB - the vanilla kernel's own EFI stub
-      # only reads its cmdline from EFI LoadOptions (an interactive
-      # shell invocation), not a `.cmdline` PE section, so `ukify`'s
-      # stub (systemd-stub) is what actually reads the embedded cmdline
-      # and chain-loads into the kernel's own EFI stub via the handover
-      # protocol - confirmed by reading the kernel's own stub source,
-      # not assumed. See hack/qemu-uefi-boot-test.sh.
+      # OVMF UEFI firmware - no QEMU -kernel/-append shortcut at all.
+      # Needed CONFIG_ACPI in the kernel for the first time (CONFIG_EFI
+      # depends on it) plus CONFIG_EFI/CONFIG_EFI_STUB - the vanilla
+      # kernel's own EFI stub only reads its cmdline from EFI
+      # LoadOptions (an interactive shell invocation), not a `.cmdline`
+      # PE section, so `ukify`'s stub (systemd-stub) is what actually
+      # reads the embedded cmdline and chain-loads into the kernel's own
+      # EFI stub via the handover protocol - confirmed by reading the
+      # kernel's own stub source, not assumed. Uses a standalone
+      # ESP + two separate squashfs/verity drives, not
+      # image/disk/assemble.sh's merged disk - see the next step for
+      # that. See hack/qemu-uefi-boot-test.sh.
       - name: UKI boots under real UEFI firmware (Phase 3 cont'd)
         run: make qemu-uefi-boot-test
 
+      # Phase 3 cont'd: the ESP now lives on image/disk/assemble.sh's
+      # single GPT disk too (partition 1, ahead of both A/B slots) - the
+      # real, complete, single-disk shape a deployed node would have.
+      # Proves the whole thing end to end under real OVMF firmware (one
+      # virtio-blk drive, no -kernel/-append), AND that
+      # image/disk/activate-slot.sh's in-place ESP swap - rewriting only
+      # the ESP to point at the other slot, leaving BOOT-A/BOOT-B/STATE
+      # untouched - actually works: boot slot A (fresh CA onto STATE),
+      # switch to slot B in place, boot again, confirm slot B is live
+      # *and* STATE (the CA) survived the switch. This is the groundwork
+      # a real LifecycleService.Upgrade/Rollback will build on. See
+      # hack/qemu-uefi-ab-boot-test.sh.
+      - name: Single-disk UEFI A/B - slot switch survives with STATE intact (Phase 3 cont'd)
+        run: make qemu-uefi-ab-boot-test
+
       # TODO(Phase 3 cont'd): Secure Boot signing (needs a real signing
       # key - `ukify build --secureboot-private-key/--secureboot-
-      # certificate` - and CONFIG_EFI_STUB alone doesn't verify
-      # anything, that's OVMF's/real firmware's own Secure Boot policy),
-      # merging the ESP into image/disk/assemble.sh's single GPT disk
-      # (still a separate image today), image/iso, image/kvm-proxmox,
-      # image/vmware, LifecycleService.Install/Upgrade/Rollback (needs a
-      # real way to pick which A/B slot is "active" and write a new
-      # image into the inactive one - both slots are still identical,
-      # static content today), upload artifacts to a GitHub Release.
+      # certificate` - CONFIG_EFI_STUB alone doesn't verify anything,
+      # that's OVMF's/real firmware's own Secure Boot policy), image/iso,
+      # image/kvm-proxmox, image/vmware, LifecycleService.Install/
+      # Upgrade/Rollback (the gRPC API driving image/disk/
+      # activate-slot.sh's own operation, plus actually writing a new
+      # rootfs image into the inactive slot - both slots are still
+      # identical, static content today), upload artifacts to a GitHub
+      # Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

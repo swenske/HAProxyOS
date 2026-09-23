@@ -466,13 +466,46 @@ plan - not implemented yet.
   out into `hack/dm-verity-cmdline.sh`, shared by all four - the other
   three were re-verified to still pass unchanged after the refactor,
   not just assumed to.
+  The ESP now lives on `image/disk/assemble.sh`'s single GPT disk too -
+  the real, complete, single-disk shape a deployed node would have:
+  partition 1 is the ESP, 2/3 are `BOOT-A-DATA`/`BOOT-A-HASH`, 4/5 are
+  `BOOT-B-DATA`/`BOOT-B-HASH`, 6 is `STATE`. `image/disk/
+  activate-slot.sh` rewrites **only** the ESP partition in place - a new
+  UKI whose cmdline points at the other slot's data/hash partitions,
+  `dd`'d at the ESP's own offset (found via `sgdisk -i 1`, same
+  no-mount/no-loop-device pattern as everywhere else) - leaving both
+  A/B slots' content and `STATE` completely untouched. This is
+  deliberately the minimal, narrow operation a real
+  `LifecycleService.Upgrade`/`Rollback` will eventually need at the
+  image level: "make the other slot the one that boots" without
+  disturbing anything else, most importantly `STATE` (PKI, applied
+  config).
+  Adding the ESP shifted every partition number by one, and surfaced a
+  real bug the hard way: `rootfs/init/cmdline.go`'s `statePartitionDevice`
+  still hardcoded `STATE` as partition 5 (now `BOOT-B-HASH`, not
+  `STATE`), so `mountState` was silently mounting a dm-verity hash tree
+  as if it were an ext4 filesystem - the mount failed, `mount()` only
+  logs and falls back (never aborts the boot, see its own doc comment),
+  so the visible symptom was PKI quietly regenerating a fresh CA on
+  every single boot again, exactly like the *first* time this class of
+  bug happened. Caught by actually switching to slot B and rebooting,
+  not by inspection - fixed by updating the constant to `6` and adding
+  `hack/qemu-uefi-ab-boot-test.sh`, which exists specifically to keep
+  re-catching this: it boots slot A (fresh CA), calls
+  `activate-slot.sh` to switch to slot B **in place**, boots again under
+  real OVMF firmware with a single drive, and asserts both that the
+  console's own `dm-mod.create=` line now references
+  `/dev/vda4`/`/dev/vda5` (the switch actually took effect) and that
+  haproxyosd's "first boot" log line does **not** reappear (`STATE`,
+  and the CA on it, genuinely survived the switch).
   Still open: Secure Boot signing (`ukify build
   --secureboot-private-key`/`--secureboot-certificate` - needs a real
   signing key; `CONFIG_EFI_STUB` alone verifies nothing, that's
-  firmware's own Secure Boot policy), merging the ESP into
-  `image/disk/assemble.sh`'s single GPT disk (still a separate image
-  today), and the `LifecycleService` RPCs to drive an actual
-  install/upgrade/rollback are still separate, unbuilt pieces.
+  firmware's own Secure Boot policy), and the `LifecycleService` RPCs
+  to drive an actual install/upgrade/rollback (the gRPC API in front of
+  `activate-slot.sh`'s own operation, plus actually writing a new
+  rootfs image into the inactive slot - both slots are still identical,
+  static content today) are still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
