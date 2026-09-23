@@ -16,6 +16,14 @@
 #                        as a separate file on a real node)
 set -euo pipefail
 
+# Debian installs veritysetup (cryptsetup-bin) to /usr/sbin, which isn't
+# guaranteed to be on PATH for a non-interactive/non-root shell even once
+# the package is installed - confirmed on haproxyos-runner01, where this
+# script's own `mksquashfs` call (installed to /usr/bin, always on PATH)
+# succeeded but `veritysetup` failed with "command not found" despite
+# `apt-get install cryptsetup-bin` having just run cleanly in the same job.
+export PATH="$PATH:/usr/sbin:/sbin"
+
 OUT_DIR="${1:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
 INIT_BIN="${2:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
 DAEMON_BIN="${3:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
