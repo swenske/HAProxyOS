@@ -354,10 +354,13 @@ plan - not implemented yet.
   each time: boot 1 must log haproxyosd's "first boot - generated a new
   CA" line (fresh bootstrap) and serve on the bootstrap default's
   `:8080`; boot 2 must not log that line again (loaded, not
-  regenerated); between boot 2 and boot 3 the script directly
-  loop-mounts `state.img` on the **host** and overwrites the persisted
-  `haproxy.cfg` with one bound to `:8081` instead - standing in for a
-  real `ApplyConfig` RPC (already covered elsewhere by
+  regenerated); between boot 2 and boot 3 the script directly injects a
+  new `haproxy.cfg` into `state.img` via `debugfs -w` - no mount, no
+  loop device, no root - bound to `:8081` instead, standing in for a
+  real `ApplyConfig` RPC (a real `mount -o loop` was the first thing
+  tried here, and failed outright on `haproxyos-runner01` - an
+  unprivileged LXC container - with "failed to setup loop device",
+  despite working fine locally; already covered elsewhere by
   `image-build.yml`'s own mTLS integration test; what's under test here
   is specifically whether `Manager.Apply`'s write target actually lives
   on persistent storage) - and boot 3 must answer on `:8081` and

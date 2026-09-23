@@ -22,9 +22,13 @@
 #      LoadOrBootstrap finds an existing ca.crt and loads it instead.
 #      Still bootstrap default config (nothing's applied yet), so :8080
 #      must still answer.
-#   3. between boot 2 and boot 3, this script directly loop-mounts
-#      state.img on the HOST and overwrites haproxy/haproxy.cfg with a
-#      config bound to :8081 instead - standing in for a real
+#   3. between boot 2 and boot 3, this script directly injects a new
+#      haproxy/haproxy.cfg into state.img via `debugfs -w` (no mount, no
+#      loop device, no root needed - deliberately: haproxyos-runner01 is
+#      an unprivileged LXC container, where a real `mount -o loop`
+#      failed outright with "failed to setup loop device" the first
+#      time this test ran there, despite working fine locally) - a
+#      config bound to :8081 instead, standing in for a real
 #      HAProxyService.ApplyConfig RPC (already covered by
 #      image-build.yml's own mTLS integration test step; what's under
 #      test *here* is specifically whether internal/haproxy.Manager.
@@ -39,9 +43,9 @@
 # <rootfs-dir> must contain rootfs.squashfs, rootfs.verity,
 # rootfs.roothash and rootfs.verity.info (see rootfs/assemble.sh).
 # <state-image> is a writable ext4 image (see rootfs/state-image.sh) -
-# this script mutates it in place, including directly via a host-side
-# loop mount (needs passwordless sudo, same as it's already used
-# elsewhere in image-build.yml).
+# this script mutates it in place, including directly via `debugfs -w`
+# (e2fsprogs, same package as rootfs/state-image.sh's own mkfs.ext4 -
+# no extra tool needed, no root needed).
 set -euo pipefail
 
 KERNEL="${1:?usage: $0 <bzImage> <rootfs-dir> <state-image>}"
@@ -149,10 +153,8 @@ echo "Second boot OK: loaded the existing CA from the persistent STATE partition
 # haproxy/ subdirectory the way internal/haproxy.Manager.Apply's own
 # os.WriteFile(m.ConfigPath, ...) would, once /etc/haproxy is
 # bind-mounted from it (see rootfs/init/main.go's mountState).
-MNT="$WORKDIR/state-mnt"
-mkdir -p "$MNT"
-sudo mount -o loop "$STATE_IMAGE" "$MNT"
-sudo tee "$MNT/haproxy/haproxy.cfg" >/dev/null <<'EOF'
+APPLIED_CFG="$WORKDIR/applied-haproxy.cfg"
+cat > "$APPLIED_CFG" <<'EOF'
 global
     stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
     chroot /var/empty
@@ -169,8 +171,12 @@ frontend haproxyos-health
     bind *:8081
     http-request return status 200 content-type text/plain string "HAProxyOS: applied config is live\n"
 EOF
-sudo umount "$MNT"
-rmdir "$MNT"
+# `rm` first: debugfs's `write` refuses to overwrite an existing file.
+# The rm's own "file not found"-style output (there's always something
+# there already, from mountState's first-boot seeding) is expected and
+# discarded rather than treated as this command's failure.
+debugfs -w -R "rm haproxy/haproxy.cfg" "$STATE_IMAGE" >/dev/null 2>&1 || true
+debugfs -w -R "write $APPLIED_CFG haproxy/haproxy.cfg" "$STATE_IMAGE"
 echo "Applied a config bound to :8081 directly onto the persistent STATE partition (standing in for ApplyConfig)"
 
 BOOT3_LOG="$WORKDIR/boot3.log"
