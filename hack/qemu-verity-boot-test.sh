@@ -20,7 +20,13 @@
 # not assumed from documentation alone.
 #
 # Runs two boots:
-#   1. the real, untampered image - must print the boot marker.
+#   1. the real, untampered image, with virtio-net + DHCP like Phase 2's
+#      network test - must not just print the boot marker but actually
+#      have HAProxy answer real HTTP, proving rootfs/init's ephemeral
+#      tmpfs overlay (see rootfs/init/main.go's mountEphemeral) makes
+#      the verified-read-only root genuinely bootable end to end:
+#      haproxyosd's PKI bootstrap and HAProxy's own startup both need to
+#      write to paths that live under /etc and /run.
 #   2. a copy of rootfs.squashfs with one byte flipped - dm-verity must
 #      refuse to mount it (no marker, kernel panics trying to mount
 #      root), proving the *kernel*, not just `veritysetup verify` on the
@@ -34,7 +40,9 @@ set -euo pipefail
 
 KERNEL="${1:?usage: $0 <bzImage> <rootfs-dir>}"
 ROOTFS_DIR="${2:?usage: $0 <bzImage> <rootfs-dir>}"
-TIMEOUT_SECS="${QEMU_VERITY_BOOT_TIMEOUT:-30}"
+BOOT_TIMEOUT_SECS="${QEMU_VERITY_BOOT_TIMEOUT:-30}"
+HTTP_TIMEOUT_SECS="${QEMU_VERITY_HTTP_TIMEOUT:-30}"
+HOST_PORT="${QEMU_VERITY_TEST_PORT:-18082}"
 MARKER="HAPROXYOS_INIT_BOOT_OK"
 
 SQUASHFS="$ROOTFS_DIR/rootfs.squashfs"
@@ -48,36 +56,58 @@ HASH_BLOCK_SIZE="$(grep '^Hash block size:' "$INFO" | awk '{print $4}')"
 SECTORS=$(( DATA_BLOCKS * DATA_BLOCK_SIZE / 512 ))
 
 dm_table() {
-  # $1 = squashfs image path to boot from (real or tampered)
   echo "vroot,,,ro,0 $SECTORS verity 1 /dev/vda /dev/vdb $DATA_BLOCK_SIZE $HASH_BLOCK_SIZE $DATA_BLOCKS 1 sha256 $ROOTHASH $SALT"
 }
 
-boot() {
-  # $1 = squashfs image to attach as /dev/vda, $2 = output log path
-  local img="$1" log="$2"
-  timeout "${TIMEOUT_SECS}" qemu-system-x86_64 \
-    -kernel "$KERNEL" \
-    -append "console=ttyS0 panic=-1 dm-mod.create=\"$(dm_table)\" root=/dev/dm-0 rootfstype=squashfs ro" \
-    -nographic -no-reboot -m 256M \
-    -drive file="$img",format=raw,if=virtio,readonly=on \
-    -drive file="$VERITY",format=raw,if=virtio,readonly=on \
-    -serial mon:stdio \
-    >"$log" 2>&1 || true
-}
-
 WORKDIR="$(mktemp -d)"
-trap 'rm -rf "$WORKDIR"' EXIT
+QEMU_PID=""
+cleanup() {
+  [ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null || true
+  rm -rf "$WORKDIR"
+}
+trap cleanup EXIT
 
+# --- 1. real image, over the network, must actually serve HTTP ---
 GOOD_LOG="$WORKDIR/good.log"
-boot "$SQUASHFS" "$GOOD_LOG"
-if ! grep -q "$MARKER" "$GOOD_LOG"; then
-  echo "Verity boot FAILED: $MARKER not found booting the real image within ${TIMEOUT_SECS}s" >&2
+qemu-system-x86_64 \
+  -kernel "$KERNEL" \
+  -append "console=ttyS0 panic=-1 dm-mod.create=\"$(dm_table)\" root=/dev/dm-0 rootfstype=squashfs ro ip=dhcp" \
+  -nographic -no-reboot -display none -m 256M \
+  -drive file="$SQUASHFS",format=raw,if=virtio,readonly=on \
+  -drive file="$VERITY",format=raw,if=virtio,readonly=on \
+  -netdev "user,id=net0,hostfwd=tcp::${HOST_PORT}-:8080" \
+  -device virtio-net-pci,netdev=net0 \
+  -serial file:"$GOOD_LOG" \
+  &
+QEMU_PID=$!
+
+deadline=$((SECONDS + HTTP_TIMEOUT_SECS))
+code=""
+while [ "$SECONDS" -lt "$deadline" ]; do
+  code="$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/" || true)"
+  [ "$code" = "200" ] && break
+  sleep 1
+done
+
+kill "$QEMU_PID" 2>/dev/null || true
+wait "$QEMU_PID" 2>/dev/null || true
+QEMU_PID=""
+
+if [ "$code" != "200" ]; then
+  echo "Verity boot FAILED: no HTTP 200 from HAProxy within ${HTTP_TIMEOUT_SECS}s (last code: '${code}')" >&2
   echo "--- console output ---" >&2
   cat "$GOOD_LOG" >&2
   exit 1
 fi
-echo "Verity boot OK: found $MARKER booting the real dm-verity-protected image"
+if ! grep -q "$MARKER" "$GOOD_LOG"; then
+  echo "Verity boot FAILED: got HTTP 200 but $MARKER never appeared on the console - investigate" >&2
+  echo "--- console output ---" >&2
+  cat "$GOOD_LOG" >&2
+  exit 1
+fi
+echo "Verity boot OK: $MARKER printed and HAProxy answered HTTP 200, from the dm-verity-verified root"
 
+# --- 2. tampered image, must never even reach userspace ---
 TAMPERED="$WORKDIR/tampered.squashfs"
 cp "$SQUASHFS" "$TAMPERED"
 # Corrupting the very first byte (squashfs's own superblock) guarantees
@@ -91,7 +121,15 @@ cp "$SQUASHFS" "$TAMPERED"
 printf '\xFF' | dd of="$TAMPERED" bs=1 seek=0 count=1 conv=notrunc status=none
 
 TAMPER_LOG="$WORKDIR/tampered.log"
-boot "$TAMPERED" "$TAMPER_LOG"
+timeout "${BOOT_TIMEOUT_SECS}" qemu-system-x86_64 \
+  -kernel "$KERNEL" \
+  -append "console=ttyS0 panic=-1 dm-mod.create=\"$(dm_table)\" root=/dev/dm-0 rootfstype=squashfs ro" \
+  -nographic -no-reboot -m 256M \
+  -drive file="$TAMPERED",format=raw,if=virtio,readonly=on \
+  -drive file="$VERITY",format=raw,if=virtio,readonly=on \
+  -serial mon:stdio \
+  >"$TAMPER_LOG" 2>&1 || true
+
 if grep -q "$MARKER" "$TAMPER_LOG"; then
   echo "Verity boot FAILED: tampered image booted successfully (found $MARKER) - dm-verity did not stop it" >&2
   echo "--- console output ---" >&2

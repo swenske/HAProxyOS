@@ -1,5 +1,6 @@
 // Command init is HAProxyOS's PID 1. It mounts proc/sysfs/devtmpfs,
-// prints a fixed success marker that hack/qemu-run.sh greps for, then:
+// sets up an ephemeral tmpfs writable layer (see mountEphemeral), prints
+// a fixed success marker that hack/qemu-run.sh greps for, then:
 //   - if /sbin/haproxyosd is present in the initramfs, starts it under a
 //     Supervisor (see supervisor.go) that restarts it - with a growing,
 //     capped backoff - every time it exits, forever. There's no give-up
@@ -16,6 +17,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -32,10 +34,56 @@ func mount(source, target, fstype string) {
 	}
 }
 
+// mountEphemeral gives the otherwise fully read-only (Phase 3: dm-verity
+// verified) root a writable layer, entirely tmpfs-backed - nothing here
+// survives a reboot yet, that needs a real persistent STATE partition
+// (still not built, see docs/architecture.md's Phase 3 notes). /run and
+// /tmp are mounted empty - nothing pre-existing there needs to survive
+// the overmount (haproxyosd's /run/haproxyos, HAProxy's stats socket/pid
+// file, Manager.Validate's tmpfile). /etc needs its own handling since
+// it isn't empty on a freshly-booted node: rootfs/base/etc/haproxy/
+// haproxy.cfg (the bootstrap default config) lives on the squashfs and
+// would otherwise vanish under a plain tmpfs mount, so its bytes are
+// read *before* the overmount and rewritten into the new tmpfs - this
+// is what makes both PKI bootstrap (/etc/haproxyos/pki) and a live
+// ApplyConfig RPC (which writes to this same path) actually work on a
+// dm-verity-booted node; before this, haproxyosd crash-looped forever
+// on "read-only file system" trying to create either. /var is left
+// alone (still squashfs-backed): the only thing under it is /var/empty,
+// HAProxy's chroot jail, which must keep the exact immutable mode-0000
+// baked into the image by rootfs/assemble.sh, not a fresh writable one
+// recreated here.
+func mountEphemeral() {
+	mount("tmpfs", "/run", "tmpfs")
+	mount("tmpfs", "/tmp", "tmpfs")
+
+	const seedCfg = "/etc/haproxy/haproxy.cfg"
+	cfgBytes, readErr := os.ReadFile(seedCfg)
+	cfgMode := os.FileMode(0o644)
+	if info, err := os.Stat(seedCfg); err == nil {
+		cfgMode = info.Mode().Perm()
+	}
+
+	mount("tmpfs", "/etc", "tmpfs")
+
+	if readErr != nil {
+		fmt.Printf("init: read %s before /etc overlay: %v\n", seedCfg, readErr)
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(seedCfg), 0o755); err != nil {
+		fmt.Printf("init: mkdir %s: %v\n", filepath.Dir(seedCfg), err)
+		return
+	}
+	if err := os.WriteFile(seedCfg, cfgBytes, cfgMode); err != nil {
+		fmt.Printf("init: write %s: %v\n", seedCfg, err)
+	}
+}
+
 func main() {
 	mount("proc", "/proc", "proc")
 	mount("sysfs", "/sys", "sysfs")
 	mount("devtmpfs", "/dev", "devtmpfs")
+	mountEphemeral()
 
 	release, err := os.ReadFile("/proc/sys/kernel/osrelease")
 	if err != nil {

@@ -308,15 +308,31 @@ plan - not implemented yet.
   `veritysetup verify` tamper test above uses) can land in a file
   `/sbin/init` only reads *after* printing its own boot marker, letting
   a real corruption slip past a naive "did the marker print" check.
-  Still open: the newly-verified root is read-only in the fullest sense
-  - `haproxyosd` now crash-loops forever trying to create
-  `/run/haproxyos` and `/etc/haproxyos/pki`, proving the immutability
-  but leaving nothing bootable end-to-end yet. Needed next: an ephemeral
-  tmpfs overlay for `/run`/`/var`/`/tmp` and a persistent STATE
-  partition for the PKI directory, then A/B partitioning, UEFI + a
-  Unified Kernel Image, Secure Boot signing, and the `LifecycleService`
-  RPCs to drive an actual install/upgrade/rollback - none of that exists
-  yet.
+  `rootfs/init/main.go`'s `mountEphemeral` now gives the verified root a
+  writable layer, entirely tmpfs-backed: `/run` and `/tmp` mounted
+  empty (nothing pre-existing there needs to survive - haproxyosd's
+  `/run/haproxyos`, HAProxy's stats socket/pid file, `Manager.Validate`'s
+  tmpfile); `/etc` needs its bootstrap `haproxy.cfg` bytes read *before*
+  the tmpfs overmount and rewritten after, since that file (unlike
+  `/run`/`/tmp`) isn't empty on a freshly-booted node - this is what
+  makes both PKI bootstrap (`/etc/haproxyos/pki`) and a live
+  `ApplyConfig` RPC (same path) actually work. `/var` is deliberately
+  left alone, still squashfs-backed: the only thing under it is
+  `/var/empty`, HAProxy's chroot jail, which must keep the exact
+  immutable mode-0000 baked into the image, not a fresh writable one.
+  `hack/qemu-verity-boot-test.sh`'s "good" boot now adds virtio-net +
+  DHCP like Phase 2's own test and asserts real HTTP 200 from HAProxy,
+  not just the boot marker - proving the whole chain (PKI bootstrap,
+  HAProxy startup, config read) genuinely works from a dm-verity-booted,
+  read-only node, not just that the kernel got as far as running
+  `/sbin/init`.
+  Still open: **none of this survives a reboot** - the tmpfs layer is
+  wiped every time, so a fresh CA/admin cert gets generated on every
+  boot and any `ApplyConfig` change is lost. A real persistent STATE
+  partition for `/etc/haproxyos/pki` (and, later, applied config) is
+  still a separate, unbuilt piece - along with A/B partitioning, UEFI +
+  a Unified Kernel Image, Secure Boot signing, and the `LifecycleService`
+  RPCs to drive an actual install/upgrade/rollback.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
