@@ -38,7 +38,7 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq qemu-system-x86 squashfs-tools cryptsetup-bin e2fsprogs gdisk \
-            ovmf systemd-ukify mtools dosfstools
+            ovmf systemd-ukify mtools dosfstools sbsigntool python3-virt-firmware
 
       # Phase 1: builds bzImage (kernel/Dockerfile's fetch -> config ->
       # build -> export stages) + the init-only initramfs (rootfs/init,
@@ -354,14 +354,37 @@ jobs:
       - name: LifecycleService.Rollback reboots into the other slot for real (Phase 3 cont'd)
         run: make qemu-lifecycle-rollback-test
 
-      # TODO(Phase 3 cont'd): Secure Boot signing (needs a real signing
-      # key - `ukify build --secureboot-private-key/--secureboot-
-      # certificate` - CONFIG_EFI_STUB alone doesn't verify anything,
-      # that's OVMF's/real firmware's own Secure Boot policy), image/iso,
-      # image/kvm-proxmox, image/vmware, LifecycleService.Install/
-      # Upgrade (need to write a genuinely new rootfs image into the
-      # inactive slot, plus a post-reboot health check with automatic
-      # rollback - both slots are still identical, static content
-      # today), upload artifacts to a GitHub Release.
+      # Phase 3 cont'd: Secure Boot signing/enforcement is real, proven
+      # both directions - a UKI signed with a throwaway test key
+      # (image/secureboot/gen-test-key.sh, generated fresh every run,
+      # never committed - a real project release key needs real key
+      # management, out of scope here) boots under genuinely
+      # Secure-Boot-enabled UEFI firmware with that key enrolled
+      # (image/secureboot/enroll-vars.sh), and an unsigned UKI on the
+      # exact same enrolled vars is refused by firmware itself ("Access
+      # Denied"), never even reaching the kernel. `enroll-vars.sh`'s own
+      # comment explains a real bug caught along the way: `virt-fw-vars
+      # --enroll-cert` (the obvious "just enroll my cert" shortcut)
+      # only populates PK/KEK, never db - the one list that actually
+      # authorizes *boot images* - so a correctly signed UKI still got
+      # "Access Denied" until switched to explicit --set-pk/--add-kek/
+      # --add-db (same cert, all three). This test also needs the
+      # secboot-capable OVMF binary (OVMF_CODE_4M.secboot.fd) plus
+      # `-machine q35,smm=on` specifically - the plain i440fx machine
+      # type every other boot test here uses produces zero console
+      # output at all with that firmware binary (found by an identical
+      # command, only the machine type changed, going from a total
+      # hang to a normal boot). See hack/qemu-secureboot-test.sh.
+      - name: Secure Boot enforcement, both directions (Phase 3 cont'd)
+        run: make qemu-secureboot-test
+
+      # TODO(Phase 3 cont'd): image/iso, image/kvm-proxmox, image/vmware,
+      # LifecycleService.Install/Upgrade (need to write a genuinely new
+      # rootfs image into the inactive slot, plus a post-reboot health
+      # check with automatic rollback - both slots are still identical,
+      # static content today), a real signing key for Secure Boot
+      # (image/secureboot/gen-test-key.sh is explicitly a throwaway test
+      # key, not a production one - real key management is a separate,
+      # unaddressed concern), upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

@@ -540,14 +540,47 @@ plan - not implemented yet.
   the second boot's own console cmdline referencing `/dev/vda4`, and
   PKI's "first boot" line appearing exactly once (`STATE` survived a
   real, API-driven reboot, not just a build-tool-driven one).
-  Still open: Secure Boot signing (`ukify build
-  --secureboot-private-key`/`--secureboot-certificate` - needs a real
-  signing key; `CONFIG_EFI_STUB` alone verifies nothing, that's
-  firmware's own Secure Boot policy), and `LifecycleService.Install`/
-  `Upgrade` (need to write a genuinely new rootfs image into the
-  inactive slot, plus a post-reboot health check with automatic
-  rollback - both slots are still identical, static content today) are
-  still separate, unbuilt pieces.
+  Secure Boot signing/enforcement is now real too, proven both
+  directions: `image/uki/assemble.sh` grew two optional trailing
+  args (signing key/cert) - given both, `ukify build
+  --secureboot-private-key`/`--secureboot-certificate` (which shells
+  out to `sbsign`) signs the UKI; given neither, unsigned exactly as
+  before, so every other boot test here is unaffected.
+  `image/secureboot/gen-test-key.sh` generates a throwaway, self-signed
+  RSA key + cert (never committed - a real project release key needs
+  real key management: HSM, CI secret, offline root of trust, none of
+  which a build script should generate on the fly) and
+  `image/secureboot/enroll-vars.sh` enrolls it into a fresh OVMF vars
+  file, Secure Boot on.
+  A real bug caught the hard way, not by reading docs: `virt-fw-vars
+  --enroll-cert <cert>` (the obvious "just enroll my cert" convenience
+  shortcut) turned out to only populate `PK` and `KEK` - **never
+  `db`**, the one list that actually authorizes *boot images* (`PK`/
+  `KEK` only govern who can update the Secure Boot variables
+  themselves) - so a correctly signed UKI, checked independently with
+  `sbverify` and confirmed valid, still got refused with "Access
+  Denied" by real firmware. Diagnosed by printing the resulting vars
+  store (`virt-fw-vars -p`) and finding no `db` variable in it at all;
+  fixed by switching to explicit `--set-pk`/`--add-kek`/`--add-db`
+  (same cert, all three) instead of the shortcut. A second, purely
+  environmental issue: the secboot-capable OVMF firmware binary
+  (`OVMF_CODE_4M.secboot.fd`) produced **zero console output at all**
+  under the plain `i440fx` machine type every other boot test in this
+  project uses - identical command, only `-machine q35,smm=on
+  -global driver=cfi.pflash01,property=secure,value=on` added, and it
+  went from a silent hang to a normal boot; secure-boot-capable OVMF
+  builds generally assume SMM-based flash variable protection, which
+  needs `q35`.
+  `hack/qemu-secureboot-test.sh` proves both directions with one real
+  key: the signed UKI must boot; an *unsigned* UKI, on the exact same
+  enrolled vars, must be refused by firmware itself (`grep`s the
+  console for "Access Denied"), never even reaching the kernel.
+  Still open: `LifecycleService.Install`/`Upgrade` (need to write a
+  genuinely new rootfs image into the inactive slot, plus a post-reboot
+  health check with automatic rollback - both slots are still
+  identical, static content today) and a real production signing key
+  (the test key above is exactly that - a test key) are still separate,
+  unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

@@ -15,7 +15,7 @@ GEN_DIR := gen
 	daemon-static initramfs-full qemu-network-test rootfs-build \
 	qemu-verity-boot-test state-image qemu-state-persist-test \
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
-	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test
+	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test
 
 all: build
 
@@ -219,6 +219,20 @@ qemu-uefi-ab-boot-test: disk-image
 # haproxyosctl built (see `build`).
 qemu-lifecycle-rollback-test: build disk-image
 	./hack/qemu-lifecycle-rollback-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
+
+# Phase 3 cont'd: proves Secure Boot signing/enforcement actually works,
+# both directions - a UKI signed with a throwaway test key (image/
+# secureboot/gen-test-key.sh, generated fresh every run, never
+# committed) boots under real, Secure-Boot-enabled UEFI firmware with
+# that key enrolled (image/secureboot/enroll-vars.sh); an unsigned UKI
+# on the exact same enrolled vars is refused by firmware itself
+# ("Access Denied"), never reaching the kernel. Requires sbsigntool
+# (ukify shells out to sbsign) and python3-virt-firmware (virt-fw-vars).
+# See hack/qemu-secureboot-test.sh for why this needs
+# OVMF_CODE_4M.secboot.fd and -machine q35,smm=on specifically, unlike
+# every other UEFI boot test here.
+qemu-secureboot-test: kernel-build rootfs-build
+	./hack/qemu-secureboot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`

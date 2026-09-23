@@ -20,20 +20,30 @@
 # ephemeral tmpfs for PKI/config the same way it always has; this
 # script only cares about root=, not STATE.
 #
-# Usage: image/uki/assemble.sh <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>
+# Usage: image/uki/assemble.sh <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]
 # <rootfs-dir> must contain rootfs.verity.info/rootfs.roothash (see
 # rootfs/assemble.sh and hack/dm-verity-cmdline.sh). <data-device>/
 # <hash-device> are the two virtio-blk devices root will actually be
 # attached as at boot (e.g. /dev/vdb /dev/vdc, if an ESP is vda) -
 # baked into the UKI's cmdline permanently, since there's no way to
 # override it after the fact without reassembling.
+#
+# [signing-key]/[signing-cert] are optional - given both, the UKI is
+# Secure Boot-signed (`ukify` shells out to `sbsign`) with them; given
+# neither (the default, used by every caller except
+# hack/qemu-secureboot-test.sh), the UKI is unsigned, exactly as
+# before - Secure Boot enforcement is opt-in at the firmware/vars level
+# (see image/secureboot/), not something every other boot test in this
+# project needs to care about.
 set -euo pipefail
 
-OUT="${1:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>}"
-KERNEL="${2:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>}"
-ROOTFS_DIR="${3:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>}"
-DATA_DEV="${4:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>}"
-HASH_DEV="${5:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device>}"
+OUT="${1:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]}"
+KERNEL="${2:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]}"
+ROOTFS_DIR="${3:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]}"
+DATA_DEV="${4:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]}"
+HASH_DEV="${5:?usage: $0 <out.efi> <bzImage> <rootfs-dir> <data-device> <hash-device> [signing-key] [signing-cert]}"
+SIGNING_KEY="${6:-}"
+SIGNING_CERT="${7:-}"
 
 DM_TABLE="$(dirname "$0")/../../hack/dm-verity-cmdline.sh"
 CMDLINE_FILE="$(mktemp)"
@@ -44,10 +54,16 @@ trap 'rm -f "$CMDLINE_FILE"' EXIT
 } > "$CMDLINE_FILE"
 
 mkdir -p "$(dirname "$OUT")"
-ukify build \
-  --linux="$KERNEL" \
-  --cmdline="@$CMDLINE_FILE" \
-  --os-release="$(printf 'NAME=HAProxyOS\nPRETTY_NAME=HAProxyOS\nID=haproxyos\n')" \
+UKIFY_ARGS=(
+  build
+  --linux="$KERNEL"
+  --cmdline="@$CMDLINE_FILE"
+  --os-release="$(printf 'NAME=HAProxyOS\nPRETTY_NAME=HAProxyOS\nID=haproxyos\n')"
   -o "$OUT"
+)
+if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_CERT" ]; then
+  UKIFY_ARGS+=(--secureboot-private-key="$SIGNING_KEY" --secureboot-certificate="$SIGNING_CERT")
+fi
+ukify "${UKIFY_ARGS[@]}"
 
 echo "Wrote $OUT"
