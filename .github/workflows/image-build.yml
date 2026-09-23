@@ -34,10 +34,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Install QEMU
+      - name: Install QEMU + rootfs build tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86
+          sudo apt-get install -y -qq qemu-system-x86 squashfs-tools cryptsetup-bin
 
       # Phase 1: builds bzImage (kernel/Dockerfile's fetch -> config ->
       # build -> export stages) + the init-only initramfs (rootfs/init,
@@ -222,8 +222,36 @@ jobs:
       # Phase 2 is now fully done (see docs/architecture.md): HAProxy
       # integration, mTLS + role enforcement, Map*/ACLUpdate/Certificate*
       # including crt-list binding, restart-on-crash, chroot/uid.
-      # TODO(Phase 3): rootfs/assemble.sh, image/disk (A/B + dm-verity +
-      # UKI + Secure Boot), image/iso, image/kvm-proxmox, image/vmware,
-      # upload artifacts to a GitHub Release.
+
+      # Phase 3, first slice: builds a squashfs image of the real rootfs
+      # and its dm-verity hash tree (rootfs/assemble.sh), then proves
+      # verification actually works both ways - accepts the real image
+      # against its own root hash, and rejects a single-byte-tampered
+      # copy of it. Not yet wired up as something the kernel boots
+      # from - see the TODO below.
+      - name: Rootfs squashfs + dm-verity build test (Phase 3)
+        run: |
+          set -euo pipefail
+          make rootfs-build
+          roothash="$(cat build/rootfs/rootfs.roothash)"
+          veritysetup verify build/rootfs/rootfs.squashfs build/rootfs/rootfs.verity "$roothash"
+
+          cp build/rootfs/rootfs.squashfs /tmp/tampered.squashfs
+          printf '\xFF' | dd of=/tmp/tampered.squashfs bs=1 seek=500000 count=1 conv=notrunc status=none
+          if veritysetup verify /tmp/tampered.squashfs build/rootfs/rootfs.verity "$roothash" 2>/tmp/tamper-check.log; then
+            echo "expected a tampered image to fail verification, it passed" >&2
+            exit 1
+          fi
+          grep -q "Verification failed" /tmp/tamper-check.log || { echo "expected a verification-failed message, got:" >&2; cat /tmp/tamper-check.log >&2; exit 1; }
+
+      # TODO(Phase 3 cont'd): boot the kernel from this squashfs+dm-verity
+      # image instead of the plain initramfs (needs a way to set up the
+      # verity device before/without a full initramfs userspace - either
+      # the dm-mod.create= kernel cmdline parameter or a small amount of
+      # Go doing the device-mapper ioctls itself), A/B partition layout
+      # (image/disk), UEFI boot + Unified Kernel Image, Secure Boot
+      # signing, image/iso, image/kvm-proxmox, image/vmware,
+      # LifecycleService.Install/Upgrade/Rollback, upload artifacts to a
+      # GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

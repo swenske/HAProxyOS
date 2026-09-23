@@ -12,7 +12,7 @@ GEN_DIR := gen
 
 .PHONY: all build test vet lint proto clean kernel-menuconfig \
 	kernel-build init initramfs qemu-boot-test haproxy-build \
-	daemon-static initramfs-full qemu-network-test
+	daemon-static initramfs-full qemu-network-test rootfs-build
 
 all: build
 
@@ -120,3 +120,17 @@ initramfs-full: init daemon-static haproxy-build
 # (see hack/qemu-network-test.sh). Requires qemu-system-x86_64 on PATH.
 qemu-network-test: kernel-build initramfs-full
 	./hack/qemu-network-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs-full.cpio.gz
+
+# Phase 3: builds a squashfs image of the real rootfs (init + haproxyosd +
+# haproxy + bootstrap config, same content as initramfs-full but as a
+# proper filesystem image instead of a cpio archive) and its dm-verity
+# hash tree (see rootfs/assemble.sh). Requires mksquashfs (squashfs-tools)
+# and veritysetup (cryptsetup-bin) on PATH - neither needs root. Not yet
+# wired up as something the kernel actually boots from (still
+# initramfs-only for that, see qemu-boot-test/qemu-network-test) - this
+# is the build-side half of Phase 3's immutability story, verified by
+# mounting + `veritysetup verify`, not by booting from it yet.
+rootfs-build: init daemon-static haproxy-build
+	mkdir -p $(BUILD_DIR)/rootfs
+	./rootfs/assemble.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/init $(BUILD_DIR)/haproxyosd \
+		$(BUILD_DIR)/haproxy rootfs/base/etc/haproxy/haproxy.cfg

@@ -246,8 +246,43 @@ plan - not implemented yet.
   reimplement metrics export) - `internal/exporter` (HAProxyOS's own,
   system-level, built on top of the gRPC API) is explicitly **deferred
   past Phase 2**, not part of this phase.
-- **Phase 3**: real immutability - A/B, dm-verity, UKI, Secure Boot,
-  `LifecycleService.Install`/`Upgrade`/`Rollback`.
+- **Phase 3** (build side started): real immutability - A/B, dm-verity,
+  UKI, Secure Boot, `LifecycleService.Install`/`Upgrade`/`Rollback`.
+  `rootfs/assemble.sh` builds a real squashfs image of the rootfs (same
+  content as Phase 2's initramfs - init, haproxyosd, static haproxy,
+  bootstrap config - `-all-root` since there's no `/etc/passwd` to
+  resolve any other owner against) and computes its dm-verity hash tree
+  via `veritysetup format`, requiring neither step to run as root. The
+  kernel config grew `SQUASHFS`/`DM_VERITY` support (both nested behind
+  gating menus - `MISC_FILESYSTEMS` and `MD` respectively - that
+  `merge_config.sh` doesn't warn about if you forget them, it just
+  silently drops the symbol; caught by grepping the merged `.config`
+  afterward, not by trusting a clean merge). Verified two ways `veritysetup
+  verify` actually enforces integrity, not just that the happy path
+  works: accepts the real image against its own root hash, and rejects a
+  deliberately single-byte-tampered copy of it, reporting the exact
+  corrupted block position.
+  A real build-time bug caught along the way: `mksquashfs`, run as a
+  non-root build user, silently *drops* any directory it can't `open()`
+  to traverse - including one this project itself `chmod 000`'d on
+  purpose (the HAProxy chroot jail, `/var/empty`) - with only a
+  one-line, easy-to-miss "Could not open ... skipping" warning. Fixed by
+  defining that entry as an `mksquashfs` pseudo-file (`-p "var/empty D 0
+  0000 0 0"`) instead of a real chmod'd directory in the build tree, so
+  it never needs to be traversed at all. `mktemp -d`'s default `0700`
+  leaking into the squashfs root directory's own mode was a second,
+  related "build user's own environment quietly changes the image"
+  bug, fixed with an explicit `-root-mode 0755`.
+  Still open, and where this stops for now: none of this is wired up as
+  something the kernel actually **boots from** yet - Phase 1/2's plain
+  initramfs is still what boots under QEMU (verified to still work,
+  unchanged, after the kernel config grew this support). That needs a
+  way to set up the dm-verity device before or without a full initramfs
+  userspace (the `dm-mod.create=` kernel cmdline parameter, or a small
+  amount of Go doing the device-mapper ioctls itself), then A/B
+  partitioning, UEFI + a Unified Kernel Image, Secure Boot signing, and
+  the `LifecycleService` RPCs to drive an actual install/upgrade/rollback
+  - none of that exists yet.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
