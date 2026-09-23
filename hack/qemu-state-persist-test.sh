@@ -48,6 +48,14 @@
 # no extra tool needed, no root needed).
 set -euo pipefail
 
+# debugfs (e2fsprogs) installs to /usr/sbin, the same PATH gap already
+# hit and fixed for veritysetup (rootfs/assemble.sh) and mkfs.ext4
+# (rootfs/state-image.sh) on haproxyos-runner01's non-interactive shell
+# - fixed proactively here too rather than waiting for a third real CI
+# failure to rediscover the identical pattern (this one still had to be
+# found the hard way, since the tool itself - debugfs - was new).
+export PATH="$PATH:/usr/sbin:/sbin"
+
 KERNEL="${1:?usage: $0 <bzImage> <rootfs-dir> <state-image>}"
 ROOTFS_DIR="${2:?usage: $0 <bzImage> <rootfs-dir> <state-image>}"
 STATE_IMAGE="${3:?usage: $0 <bzImage> <rootfs-dir> <state-image>}"
