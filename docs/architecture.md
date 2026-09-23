@@ -388,7 +388,9 @@ plan - not implemented yet.
   different into the inactive slot, so this proves the layout/dm-verity-
   via-partition-device mechanics, not a real upgrade workflow.
   `rootfs/init/main.go`'s `mountState` now finds `STATE` on this real
-  single-disk layout too: `resolveStateDevice` (`rootfs/init/cmdline.go`)
+  single-disk layout too: `resolveStateDevice` (`internal/bootslot` -
+  moved there from a `rootfs/init`-local file once `LifecycleService.
+  Rollback` became a second consumer, see later in this roadmap)
   parses init's own `/proc/cmdline` for the `dm-mod.create=` parameter
   it already booted with (confirmed, by actually booting a debug init
   and reading it back, that `/proc/cmdline` preserves the quotes
@@ -498,14 +500,54 @@ plan - not implemented yet.
   `/dev/vda4`/`/dev/vda5` (the switch actually took effect) and that
   haproxyosd's "first boot" log line does **not** reappear (`STATE`,
   and the CA on it, genuinely survived the switch).
+  `LifecycleService.Rollback` is now real too: `internal/api/
+  lifecycle.go` is the gRPC front end for exactly the ESP swap
+  `activate-slot.sh` performs at build/install time, except it runs on
+  an already-booted node. The target OS has no package manager, so it
+  can never shell out to `ukify` the way `activate-slot.sh` does - this
+  is precisely why that script now stages **both** slots' UKIs on the
+  ESP, at fixed paths (`\HAPROXYOS\UKI-A.EFI`, `\HAPROXYOS\UKI-B.EFI`),
+  alongside the active one (`\EFI\BOOT\BOOTX64.EFI`): at runtime,
+  `Rollback` only needs to mount the ESP (`CONFIG_VFAT_FS` -
+  `CONFIG_VFAT_FS=y` alone wasn't enough either, mounting failed
+  outright with "codepage cp437 not found" until
+  `CONFIG_NLS_CODEPAGE_437`/`CONFIG_NLS_ISO8859_1` were added too - each
+  its own separate symbol from `FAT_DEFAULT_CODEPAGE`/
+  `FAT_DEFAULT_IOCHARSET`, found by a real mount failing first) and copy
+  the other slot's already-built UKI over `BOOTX64.EFI` - no PE
+  manipulation, no build tooling, on the node at all.
+  The cmdline-parsing logic (`dmVerityDataDevice`/`statePartitionDevice`)
+  that used to live only in `rootfs/init` moved to a new shared package,
+  `internal/bootslot` - `rootfs/init` and `internal/api/lifecycle.go`
+  both need to answer "which slot am I running from, and where's the
+  rest of the disk", and duplicating that logic a second time across a
+  package boundary was the wrong call once there were two consumers of
+  it, not just a hypothetical one. It also grew `ActiveSlot`/`OtherSlot`
+  helpers `rootfs/init` never needed (STATE discovery doesn't care
+  *which* slot, just that the device is a slot at all) but `Rollback`
+  does (it needs to know current vs. target).
+  Proven with a real gRPC call, not just that the underlying mechanism
+  works when driven directly: `hack/qemu-lifecycle-rollback-test.sh`
+  boots slot A, extracts `ca.crt`/`admin.crt`/`admin.key` straight from
+  `disk.img`'s STATE partition via `debugfs` (haproxyosd only ever
+  prints the admin cert/key to the console once, on first boot, and
+  never the CA cert at all, by design - there's nothing on the console
+  to trust a fresh external connection with), calls `haproxyosctl
+  lifecycle rollback` over real mTLS, and - this is the one boot test in
+  the whole project that does **not** pass `-no-reboot` to QEMU - watches
+  the guest genuinely reboot itself inside the same QEMU process and
+  come back up on slot B, with the boot marker appearing exactly twice,
+  the second boot's own console cmdline referencing `/dev/vda4`, and
+  PKI's "first boot" line appearing exactly once (`STATE` survived a
+  real, API-driven reboot, not just a build-tool-driven one).
   Still open: Secure Boot signing (`ukify build
   --secureboot-private-key`/`--secureboot-certificate` - needs a real
   signing key; `CONFIG_EFI_STUB` alone verifies nothing, that's
-  firmware's own Secure Boot policy), and the `LifecycleService` RPCs
-  to drive an actual install/upgrade/rollback (the gRPC API in front of
-  `activate-slot.sh`'s own operation, plus actually writing a new
-  rootfs image into the inactive slot - both slots are still identical,
-  static content today) are still separate, unbuilt pieces.
+  firmware's own Secure Boot policy), and `LifecycleService.Install`/
+  `Upgrade` (need to write a genuinely new rootfs image into the
+  inactive slot, plus a post-reboot health check with automatic
+  rollback - both slots are still identical, static content today) are
+  still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

@@ -56,6 +56,8 @@ func main() {
 		runHAProxy(conn, flag.Args()[1:])
 	case "pki":
 		runPKI(conn, flag.Args()[1:])
+	case "lifecycle":
+		runLifecycle(conn, flag.Args()[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "haproxyosctl: unknown command %q\n", cmd)
 		usage()
@@ -107,6 +109,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE  upload a PEM cert+key bundle as NAME, optionally binding it into crt-list PATH")
 	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
+	fmt.Fprintln(os.Stderr, "  lifecycle rollback         switch the ESP to the other A/B slot's staged UKI and reboot into it")
 }
 
 func ctx() (context.Context, context.CancelFunc) {
@@ -168,6 +171,29 @@ func runPKI(conn *grpc.ClientConn, args []string) {
 
 	default:
 		fmt.Fprintf(os.Stderr, "haproxyosctl pki: unknown subcommand %q\n", sub)
+		usage()
+		os.Exit(2)
+	}
+}
+
+func runLifecycle(conn *grpc.ClientConn, args []string) {
+	if len(args) == 0 {
+		usage()
+		os.Exit(2)
+	}
+
+	switch sub := args[0]; sub {
+	case "rollback":
+		c, cancel := ctx()
+		defer cancel()
+		resp, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Rollback(c, &emptypb.Empty{})
+		if err != nil {
+			log.Fatalf("Rollback: %v", err)
+		}
+		fmt.Printf("Rolling back to slot %s, node is rebooting\n", resp.GetActiveSlot())
+
+	default:
+		fmt.Fprintf(os.Stderr, "haproxyosctl lifecycle: unknown subcommand %q\n", sub)
 		usage()
 		os.Exit(2)
 	}

@@ -15,7 +15,7 @@ GEN_DIR := gen
 	daemon-static initramfs-full qemu-network-test rootfs-build \
 	qemu-verity-boot-test state-image qemu-state-persist-test \
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
-	qemu-uefi-ab-boot-test
+	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test
 
 all: build
 
@@ -208,6 +208,17 @@ qemu-ab-boot-test: kernel-build disk-image
 # survived the switch untouched. See hack/qemu-uefi-ab-boot-test.sh.
 qemu-uefi-ab-boot-test: disk-image
 	./hack/qemu-uefi-ab-boot-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 3 cont'd: proves LifecycleService.Rollback (internal/api/
+# lifecycle.go) works over a real gRPC call against a running node -
+# boots slot A, calls `haproxyosctl lifecycle rollback` over real mTLS
+# (credentials extracted straight from disk.img's STATE partition via
+# debugfs, not the console - see hack/qemu-lifecycle-rollback-test.sh
+# for why), and watches the guest genuinely reboot itself (no
+# -no-reboot this time) into slot B with STATE intact. Requires
+# haproxyosctl built (see `build`).
+qemu-lifecycle-rollback-test: build disk-image
+	./hack/qemu-lifecycle-rollback-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`

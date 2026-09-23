@@ -1,8 +1,8 @@
-package main
+package bootslot
 
 import "testing"
 
-func TestDmVerityDataDevice(t *testing.T) {
+func TestDataDevice(t *testing.T) {
 	cases := []struct {
 		name    string
 		cmdline string
@@ -58,7 +58,7 @@ func TestDmVerityDataDevice(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := dmVerityDataDevice(tc.cmdline)
+			got, ok := DataDevice(tc.cmdline)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
 			}
@@ -69,7 +69,7 @@ func TestDmVerityDataDevice(t *testing.T) {
 	}
 }
 
-func TestStatePartitionDevice(t *testing.T) {
+func TestStateDevice(t *testing.T) {
 	cases := []struct {
 		name    string
 		dataDev string
@@ -85,7 +85,7 @@ func TestStatePartitionDevice(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := statePartitionDevice(tc.dataDev)
+			got, ok := StateDevice(tc.dataDev)
 			if ok != tc.wantOK {
 				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
 			}
@@ -93,5 +93,67 @@ func TestStatePartitionDevice(t *testing.T) {
 				t.Fatalf("state device = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestESPDevice(t *testing.T) {
+	cases := []struct {
+		name    string
+		dataDev string
+		want    string
+		wantOK  bool
+	}{
+		{name: "slot A data partition", dataDev: "/dev/vda2", want: "/dev/vda1", wantOK: true},
+		{name: "slot B data partition", dataDev: "/dev/vda4", want: "/dev/vda1", wantOK: true},
+		{name: "whole-disk device (separate-drives harness)", dataDev: "/dev/vda", wantOK: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ESPDevice(tc.dataDev)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("ESP device = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestActiveSlot(t *testing.T) {
+	cases := []struct {
+		name    string
+		dataDev string
+		want    string
+		wantOK  bool
+	}{
+		{name: "BOOT-A-DATA", dataDev: "/dev/vda2", want: "A", wantOK: true},
+		{name: "BOOT-B-DATA", dataDev: "/dev/vda4", want: "B", wantOK: true},
+		{name: "ESP itself is not a slot", dataDev: "/dev/vda1", wantOK: false},
+		{name: "a hash partition is not a slot", dataDev: "/dev/vda3", wantOK: false},
+		{name: "STATE is not a slot", dataDev: "/dev/vda6", wantOK: false},
+		{name: "whole-disk device", dataDev: "/dev/vda", wantOK: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := ActiveSlot(tc.dataDev)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("slot = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestOtherSlot(t *testing.T) {
+	if got := OtherSlot("A"); got != "B" {
+		t.Fatalf("OtherSlot(A) = %q, want B", got)
+	}
+	if got := OtherSlot("B"); got != "A" {
+		t.Fatalf("OtherSlot(B) = %q, want A", got)
 	}
 }

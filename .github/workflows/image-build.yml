@@ -323,21 +323,45 @@ jobs:
       # the ESP to point at the other slot, leaving BOOT-A/BOOT-B/STATE
       # untouched - actually works: boot slot A (fresh CA onto STATE),
       # switch to slot B in place, boot again, confirm slot B is live
-      # *and* STATE (the CA) survived the switch. This is the groundwork
-      # a real LifecycleService.Upgrade/Rollback will build on. See
-      # hack/qemu-uefi-ab-boot-test.sh.
+      # *and* STATE (the CA) survived the switch. This is the
+      # build/install-time half of what the next step proves works at
+      # runtime too. See hack/qemu-uefi-ab-boot-test.sh.
       - name: Single-disk UEFI A/B - slot switch survives with STATE intact (Phase 3 cont'd)
         run: make qemu-uefi-ab-boot-test
+
+      # Phase 3 cont'd: LifecycleService.Rollback (internal/api/
+      # lifecycle.go) is real - the gRPC front end for the same ESP
+      # swap the step above drives directly, except this runs it on an
+      # already-booted node with a real mTLS call, and the node - which
+      # has no package manager, so it can never shell out to `ukify` the
+      # way image/disk/activate-slot.sh does - just mounts the ESP
+      # (CONFIG_VFAT_FS) and copies the other slot's pre-staged UKI
+      # (\HAPROXYOS\UKI-A.EFI / UKI-B.EFI, staged there by
+      # activate-slot.sh precisely so this doesn't need to build
+      # anything at runtime) over \EFI\BOOT\BOOTX64.EFI, then reboots
+      # for real. This test boots without -no-reboot, unlike every
+      # other boot test here, specifically so the guest can actually
+      # reboot itself inside the same QEMU process - and checks the
+      # boot marker appears exactly twice, the cmdline on the second
+      # boot references slot B's partitions, and PKI's "first boot" line
+      # appears exactly once (STATE survived a real, API-driven reboot).
+      # mTLS credentials for the test's own haproxyosctl call are
+      # extracted straight from disk.img's STATE partition via debugfs
+      # (not the console - haproxyosd only ever prints the admin cert/
+      # key there once, on first boot, and never the CA cert at all, by
+      # design - see cmd/haproxyosd/main.go). See
+      # hack/qemu-lifecycle-rollback-test.sh.
+      - name: LifecycleService.Rollback reboots into the other slot for real (Phase 3 cont'd)
+        run: make qemu-lifecycle-rollback-test
 
       # TODO(Phase 3 cont'd): Secure Boot signing (needs a real signing
       # key - `ukify build --secureboot-private-key/--secureboot-
       # certificate` - CONFIG_EFI_STUB alone doesn't verify anything,
       # that's OVMF's/real firmware's own Secure Boot policy), image/iso,
       # image/kvm-proxmox, image/vmware, LifecycleService.Install/
-      # Upgrade/Rollback (the gRPC API driving image/disk/
-      # activate-slot.sh's own operation, plus actually writing a new
-      # rootfs image into the inactive slot - both slots are still
-      # identical, static content today), upload artifacts to a GitHub
-      # Release.
+      # Upgrade (need to write a genuinely new rootfs image into the
+      # inactive slot, plus a post-reboot health check with automatic
+      # rollback - both slots are still identical, static content
+      # today), upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

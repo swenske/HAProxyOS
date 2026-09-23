@@ -21,6 +21,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/swenske/HAProxyOS/internal/bootslot"
 )
 
 const daemonPath = "/sbin/haproxyosd"
@@ -93,11 +95,12 @@ func mountEphemeral() {
 //
 // Where to find it depends on which of two shapes actually booted -
 // resolveStateDevice tells them apart by parsing /proc/cmdline's own
-// dm-mod.create= parameter (see cmdline.go), not a separate flag or
-// convention of its own:
+// dm-mod.create= parameter (see internal/bootslot, shared with
+// internal/api/lifecycle.go's LifecycleService.Rollback), not a
+// separate flag or convention of its own:
 //   - the real, single GPT disk (image/disk/assemble.sh, booted by
 //     hack/qemu-ab-boot-test.sh): root's data device is a partition
-//     (e.g. /dev/vda1), and STATE is always partition 5 on that same
+//     (e.g. /dev/vda2), and STATE is always partition 6 on that same
 //     disk, by image/disk/assemble.sh's own fixed layout.
 //   - the older separate-virtio-blk-drives harness
 //     (hack/qemu-verity-boot-test.sh, hack/qemu-state-persist-test.sh),
@@ -190,11 +193,11 @@ func resolveStateDevice() string {
 		fmt.Printf("init: read /proc/cmdline: %v\n", err)
 		return fallback
 	}
-	dataDev, ok := dmVerityDataDevice(string(cmdline))
+	dataDev, ok := bootslot.DataDevice(string(cmdline))
 	if !ok {
 		return fallback
 	}
-	device, ok := statePartitionDevice(dataDev)
+	device, ok := bootslot.StateDevice(dataDev)
 	if !ok {
 		return fallback
 	}
