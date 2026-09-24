@@ -6,35 +6,91 @@
 <title>HAProxyOS Node</title>
 <style>
   :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
-  body { max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+  body { max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
   th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
-  h2 { font-size: 1rem; margin-top: 2rem; }
-  .error { color: #b3261e; }
-  .stale { opacity: 0.5; }
+  h2 { font-size: 1.1rem; margin-top: 2.5rem; border-bottom: 2px solid color-mix(in srgb, currentColor 15%, transparent); padding-bottom: 0.25rem; }
+  h3 { font-size: 0.95rem; margin: 1rem 0 0.5rem; }
+  .error { color: #b3261e; white-space: pre-wrap; }
+  .ok { color: #2e7d32; }
+  form.inline { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; margin-bottom: 1rem; }
+  input, select, textarea { font-family: ui-monospace, monospace; font-size: 0.85rem; padding: 0.3rem; }
+  textarea { width: 100%; box-sizing: border-box; }
+  button { cursor: pointer; }
+  button.danger { color: #b3261e; }
 </style>
 </head>
 <body>
 <h1 id="title">HAProxyOS Node</h1>
 <div id="error" class="error"></div>
+
+<h2>System</h2>
 <table id="version"></table>
-<h2>Memory</h2>
+<h3>Memory</h3>
 <table id="memory"></table>
-<h2>CPUs</h2>
+<h3>CPUs</h3>
 <table id="cpus"></table>
-<h2>Load average</h2>
+<h3>Load average</h3>
 <table id="load"></table>
-<h2>Disks</h2>
+<h3>Disks</h3>
 <table id="disks"></table>
+
+<h2>HAProxy</h2>
+<table id="haproxy-info"></table>
+
+<h2>Backends</h2>
+<table id="backends"></table>
+
+<h2>Configuration</h2>
+<p id="config-sha"></p>
+<textarea id="config-text" rows="12"></textarea>
+<form class="inline" id="config-form">
+  <button type="submit">Apply</button>
+  <span id="config-result"></span>
+</form>
+
+<h2>Maps</h2>
+<div id="maps-list"></div>
+<h3 id="map-detail-title" style="display:none"></h3>
+<table id="map-entries"></table>
+<form class="inline" id="map-form" style="display:none">
+  <input id="map-key" placeholder="key" required />
+  <input id="map-value" placeholder="value" />
+  <button type="submit">Set</button>
+  <button type="button" id="map-delete">Delete key</button>
+</form>
+
+<h2>ACLs</h2>
+<form class="inline" id="acl-form">
+  <input id="acl-name" placeholder="acl name" required />
+  <input id="acl-value" placeholder="value" required />
+  <button type="submit">Add</button>
+  <button type="button" id="acl-delete">Delete</button>
+</form>
+
+<h2>Certificates</h2>
+<table id="certs"></table>
+<form id="cert-form">
+  <div class="inline">
+    <input id="cert-name" placeholder="name" required />
+    <input id="cert-crtlist" placeholder="crt-list path (optional)" />
+    <input id="cert-sni" placeholder="SNI, comma-separated (optional)" />
+  </div>
+  <textarea id="cert-pem" rows="6" placeholder="PEM cert + key (+ chain)" required></textarea>
+  <button type="submit">Upload</button>
+</form>
+
 <script>
 // This is the *entire* per-node dashboard view - deliberately plain
-// HTML/JS, no build step, no framework: it does one thing (poll
-// /api/info, same origin, and render it), embedded straight into
-// dashboardd's binary (see dashboard/backend/internal/nodeproxy.go's
-// own go:embed) and served on this node's own dedicated mTLS-gated
-// port. The main dashboard's own React SPA (dashboard/frontend) lives
-// on a completely different origin and can't fetch this one directly -
-// see nodeproxy.go's package doc comment for why.
+// HTML/JS, no build step, no framework: it fetches this node's own
+// same-origin REST API (dashboard/backend/internal/nodeproxy.go/ops.go,
+// which relays every call to the real node's gRPC API using this
+// dashboard's own stored service credential, never the browser's own
+// client certificate). Embedded straight into dashboardd's binary via
+// go:embed, served on this node's dedicated mTLS-gated port. The main
+// dashboard's own React SPA (dashboard/frontend) lives on a completely
+// different origin and can't fetch this one directly - see
+// nodeproxy.go's package doc comment for why.
 const REFRESH_MS = 5000
 
 function row(label, value) {
@@ -45,42 +101,248 @@ function bytesToMiB(n) {
   return (n / 1024 / 1024).toFixed(1) + ' MiB'
 }
 
-async function refresh() {
-  const errorEl = document.getElementById('error')
+async function api(path, opts) {
+  const resp = await fetch(path, opts)
+  const text = await resp.text()
+  if (!resp.ok) throw new Error(text)
+  return text ? JSON.parse(text) : null
+}
+
+function showError(err) {
+  document.getElementById('error').textContent = String(err)
+}
+
+async function refreshSystem() {
+  const info = await api('/api/info')
+  document.getElementById('version').innerHTML =
+    row('Version', info.version) +
+    row('Go version', info.go_version) +
+    row('Kernel version', info.kernel_version) +
+    row('Active slot', info.active_slot || '(not an A/B boot)')
+
+  document.getElementById('memory').innerHTML =
+    row('Total', bytesToMiB(info.memory.total_bytes)) +
+    row('Available', bytesToMiB(info.memory.available_bytes)) +
+    row('Cached', bytesToMiB(info.memory.cached_bytes))
+
+  document.getElementById('cpus').innerHTML = info.cpus
+    .map((c) => row(`CPU ${c.processor}`, `${c.model_name} (${c.mhz.toFixed(0)} MHz)`))
+    .join('')
+
+  document.getElementById('load').innerHTML =
+    row('1 / 5 / 15 min', `${info.load_avg.load1.toFixed(2)} / ${info.load_avg.load5.toFixed(2)} / ${info.load_avg.load15.toFixed(2)}`)
+
+  document.getElementById('disks').innerHTML = info.disks
+    .map((d) => row(d.device_name, `reads=${d.read_completed} writes=${d.write_completed}`))
+    .join('')
+}
+
+async function refreshHAProxyInfo() {
+  const info = await api('/api/haproxy/info')
+  document.getElementById('haproxy-info').innerHTML =
+    row('Version', info.version) +
+    row('Uptime', `${info.uptime_seconds}s`) +
+    row('Connections', `${info.current_connections} / ${info.max_connections}`)
+}
+
+async function refreshBackends() {
+  const resp = await api('/api/haproxy/backends')
+  const backends = resp.backends || []
+  document.getElementById('backends').innerHTML = backends
+    .flatMap((b) =>
+      (b.servers || []).map(
+        (s) => `<tr>
+          <td>${b.name}</td><td>${s.name}</td><td>${s.address}</td><td>${s.state}</td>
+          <td>
+            <select data-backend="${b.name}" data-server="${s.name}" class="server-state">
+              <option value="ready" ${s.state === 'up' ? 'selected' : ''}>ready</option>
+              <option value="drain" ${s.state === 'drain' ? 'selected' : ''}>drain</option>
+              <option value="maint" ${s.state === 'maint' ? 'selected' : ''}>maint</option>
+            </select>
+          </td>
+        </tr>`
+      )
+    )
+    .join('')
+  document.querySelectorAll('.server-state').forEach((el) => {
+    el.addEventListener('change', async () => {
+      try {
+        await api('/api/haproxy/backends/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ backend: el.dataset.backend, server: el.dataset.server, state: el.value }),
+        })
+        await refreshBackends()
+      } catch (err) {
+        showError(err)
+      }
+    })
+  })
+}
+
+async function loadConfig() {
+  const cfg = await api('/api/haproxy/config')
+  document.getElementById('config-sha').textContent = `sha256: ${cfg.sha256}`
+  document.getElementById('config-text').value = cfg.config
+}
+
+document.getElementById('config-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const resultEl = document.getElementById('config-result')
+  resultEl.textContent = 'Applying…'
+  resultEl.className = ''
   try {
-    const resp = await fetch('/api/info')
-    if (!resp.ok) throw new Error(await resp.text())
-    const info = await resp.json()
-    errorEl.textContent = ''
-
-    document.getElementById('version').innerHTML =
-      row('Version', info.version) +
-      row('Go version', info.go_version) +
-      row('Kernel version', info.kernel_version) +
-      row('Active slot', info.active_slot || '(not an A/B boot)')
-
-    document.getElementById('memory').innerHTML =
-      row('Total', bytesToMiB(info.memory.total_bytes)) +
-      row('Available', bytesToMiB(info.memory.available_bytes)) +
-      row('Cached', bytesToMiB(info.memory.cached_bytes))
-
-    document.getElementById('cpus').innerHTML = info.cpus
-      .map((c) => row(`CPU ${c.processor}`, `${c.model_name} (${c.mhz.toFixed(0)} MHz)`))
-      .join('')
-
-    document.getElementById('load').innerHTML =
-      row('1 / 5 / 15 min', `${info.load_avg.load1.toFixed(2)} / ${info.load_avg.load5.toFixed(2)} / ${info.load_avg.load15.toFixed(2)}`)
-
-    document.getElementById('disks').innerHTML = info.disks
-      .map((d) => row(d.device_name, `reads=${d.read_completed} writes=${d.write_completed}`))
-      .join('')
+    const result = await api('/api/haproxy/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: document.getElementById('config-text').value }),
+    })
+    resultEl.textContent = `${result.stage}: ${result.message}`
+    resultEl.className = result.accepted ? 'ok' : 'error'
+    if (result.accepted) await loadConfig()
   } catch (err) {
-    errorEl.textContent = String(err)
+    resultEl.textContent = String(err)
+    resultEl.className = 'error'
+  }
+})
+
+async function refreshMaps() {
+  const resp = await api('/api/haproxy/maps')
+  const maps = resp.maps || []
+  document.getElementById('maps-list').innerHTML = maps
+    .map((m) => `<button type="button" class="map-select" data-map="${m}">${m}</button>`)
+    .join(' ')
+  document.querySelectorAll('.map-select').forEach((el) => {
+    el.addEventListener('click', () => selectMap(el.dataset.map))
+  })
+}
+
+let selectedMap = null
+
+async function selectMap(name) {
+  selectedMap = name
+  document.getElementById('map-detail-title').style.display = ''
+  document.getElementById('map-detail-title').textContent = name
+  document.getElementById('map-form').style.display = ''
+  const resp = await api(`/api/haproxy/maps/${encodeURIComponent(name)}`)
+  const entries = resp.entries || {}
+  document.getElementById('map-entries').innerHTML = Object.entries(entries)
+    .map(([k, v]) => row(k, v))
+    .join('')
+}
+
+document.getElementById('map-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  await mapUpdate(false)
+})
+document.getElementById('map-delete').addEventListener('click', async () => {
+  await mapUpdate(true)
+})
+
+async function mapUpdate(del) {
+  if (!selectedMap) return
+  try {
+    await api(`/api/haproxy/maps/${encodeURIComponent(selectedMap)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key: document.getElementById('map-key').value,
+        value: document.getElementById('map-value').value,
+        delete: del,
+      }),
+    })
+    await selectMap(selectedMap)
+  } catch (err) {
+    showError(err)
   }
 }
 
-refresh()
-setInterval(refresh, REFRESH_MS)
+async function aclUpdate(del) {
+  try {
+    const name = document.getElementById('acl-name').value
+    await api(`/api/haproxy/acls/${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: document.getElementById('acl-value').value, delete: del }),
+    })
+  } catch (err) {
+    showError(err)
+  }
+}
+document.getElementById('acl-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  await aclUpdate(false)
+})
+document.getElementById('acl-delete').addEventListener('click', () => aclUpdate(true))
+
+async function refreshCerts() {
+  const resp = await api('/api/haproxy/certs')
+  const certs = resp.certificates || []
+  document.getElementById('certs').innerHTML = certs
+    .map(
+      (c) => `<tr>
+        <td>${c.name}</td><td>${c.not_after}</td><td>${c.status}</td>
+        <td><button type="button" class="cert-delete" data-name="${c.name}">Delete</button></td>
+      </tr>`
+    )
+    .join('')
+  document.querySelectorAll('.cert-delete').forEach((el) => {
+    el.addEventListener('click', async () => {
+      try {
+        await api(`/api/haproxy/certs/${encodeURIComponent(el.dataset.name)}`, { method: 'DELETE' })
+        await refreshCerts()
+      } catch (err) {
+        showError(err)
+      }
+    })
+  })
+}
+
+document.getElementById('cert-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  try {
+    const sni = document.getElementById('cert-sni').value
+    await api('/api/haproxy/certs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: document.getElementById('cert-name').value,
+        pem_bundle: document.getElementById('cert-pem').value,
+        crt_list: document.getElementById('cert-crtlist').value,
+        sni: sni ? sni.split(',').map((s) => s.trim()) : [],
+      }),
+    })
+    e.target.reset()
+    await refreshCerts()
+  } catch (err) {
+    showError(err)
+  }
+})
+
+async function refreshAll() {
+  document.getElementById('error').textContent = ''
+  try {
+    await refreshSystem()
+    await refreshHAProxyInfo()
+    await refreshBackends()
+  } catch (err) {
+    showError(err)
+  }
+}
+
+async function loadOnce() {
+  try {
+    await loadConfig()
+    await refreshMaps()
+    await refreshCerts()
+  } catch (err) {
+    showError(err)
+  }
+}
+
+refreshAll()
+loadOnce()
+setInterval(refreshAll, REFRESH_MS)
 </script>
 </body>
 </html>

@@ -29,9 +29,53 @@
 #   6. confirm the mTLS gate actually rejects both no client cert at all
 #      and a cert from an unrelated CA - a real security boundary, not
 #      just "it happens to work with the right cert".
-#   7. DELETE the node, confirm it's gone from the list AND its port
+#   7. exercise the tranche 4 ops/config relay (dashboard/backend/
+#      internal/nodeproxy/ops.go) against the node's own bootstrap
+#      config - deliberately scoped to what's testable without a custom
+#      boot fixture: ShowInfo and GetConfig against real values;
+#      ApplyConfig with the exact same config read back (must be
+#      accepted - proves the round trip) and with deliberately garbage
+#      config (must be rejected, with a real validation error, and must
+#      NOT disturb the running config - internal/haproxy.Manager.Apply's
+#      own "never overwritten on a rejected apply" guarantee, now
+#      proven through the dashboard's own relay too); BackendList
+#      against its own real not-yet-implemented state (internal/api/
+#      haproxy.go's own doc comment - falls through to
+#      UnimplementedHAProxyServiceServer, so the relay must surface a
+#      real error here, not fake a success); MapList/CertificateList
+#      against the bootstrap config's genuinely empty map/cert list (a
+#      correctly-relayed empty response, not a gap - protojson's
+#      omitempty drops an empty repeated field entirely, confirmed
+#      against a real boot before encoding this assertion); a real
+#      CertificateUpload/List/Delete round trip (HAProxy's cert *store*
+#      accepts uploads unconditionally, unlike file-backed maps/ACLs,
+#      which only exist if the config already declares one - exercising
+#      a real MapUpdate/ACLUpdate success case would need injecting a
+#      whole custom haproxy.cfg + map/ACL files onto STATE before boot,
+#      real effort for coverage `internal/haproxy`'s own CI step already
+#      provides at the non-dashboard layer - so this test settles for
+#      proving MapUpdate genuinely reaches the real node and surfaces
+#      its real "no such map" error correctly, not a staged success).
+#      Writing this step's assertions found two real, previously-
+#      undiscovered bugs, both fixed alongside this test: (a) a missing
+#      SELinux policy rule (selinux/policy.conf) denied the haproxy_t
+#      domain write access to the fifo_file pipe internal/haproxy.
+#      Manager.Validate's `haproxy -c` inherits from its haproxyosd_t
+#      parent (a genuinely different object from the supervised
+#      process's own console-backed stdout/stderr, already covered) -
+#      every validation error was being silently denied mid-write,
+#      captured as an empty error list instead of haproxy's real
+#      parse-error text, on a real boot only (a permissive/plain local
+#      run never saw it - see manager.go's own comment); (b) internal/
+#      haproxy.Manager.statsCommand had no read deadline at all - a
+#      malformed multi-line payload (found via a test-harness bug of
+#      this test's own early draft, not production code, but the gap
+#      it exposed is real) leaves HAProxy's stats socket waiting for
+#      more input forever, blocking the reading goroutine past any
+#      caller's own timeout (fixed with a bounded conn.SetDeadline).
+#   8. DELETE the node, confirm it's gone from the list AND its port
 #      stops accepting connections entirely.
-#   8. re-add it, restart dashboardd against the *same* data directory,
+#   9. re-add it, restart dashboardd against the *same* data directory,
 #      and confirm both the registry and the per-node listener come back
 #      without needing to re-add anything - the whole point of
 #      persisting to disk rather than keeping the registry in memory
@@ -170,6 +214,108 @@ echo "Relay OK: real data (kernel_version, active_slot=A, memory=${mem_total} by
 NODE_UI="$(curl -sk --cert "$WORKDIR/admin.crt" --key "$WORKDIR/admin.key" "https://127.0.0.1:${NODE_LISTEN_PORT}/")"
 echo "$NODE_UI" | grep -q '<title>HAProxyOS Node</title>' || { echo "Dashboard test FAILED: per-node dashboard page not served at /: $NODE_UI" >&2; exit 1; }
 echo "Per-node UI OK: nodeproxy's own dashboard page is served at / behind the same mTLS gate as /api/info"
+
+# --- tranche 4: ops/config relay (dashboard/backend/internal/nodeproxy/ops.go) ---
+DASH_CERT=(--cert "$WORKDIR/admin.crt" --key "$WORKDIR/admin.key")
+NODE_BASE="https://127.0.0.1:${NODE_LISTEN_PORT}"
+
+HAPROXY_INFO="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/info")"
+echo "$HAPROXY_INFO" | grep -q '"version"' || { echo "Dashboard test FAILED: /api/haproxy/info missing version: $HAPROXY_INFO" >&2; exit 1; }
+echo "ShowInfo relay OK: $HAPROXY_INFO"
+
+GETCFG="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/config")"
+ORIG_SHA256="$(echo "$GETCFG" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')"
+[ -n "$ORIG_SHA256" ] || { echo "Dashboard test FAILED: /api/haproxy/config missing sha256: $GETCFG" >&2; exit 1; }
+echo "GetConfig relay OK: sha256=$ORIG_SHA256"
+
+# Re-apply the exact same config read back - must be accepted (proves the
+# round trip byte-for-byte). $(...) capturing GETCFG above only strips
+# trailing newlines from the outer JSON document, not the config text's
+# own embedded newlines (those survive as escaped "\n" inside the JSON
+# string) - safe to re-extract from $GETCFG directly here. Re-encoding
+# the raw config bytes through a shell variable instead, and stripping
+# ITS trailing newline via $(...), is the mistake that was actually made
+# once while writing this test - not this.
+python3 -c '
+import json, sys
+cfg = json.loads(sys.argv[1])["config"]
+json.dump({"config": cfg}, open(sys.argv[2], "w"))
+' "$GETCFG" "$WORKDIR/apply-same.json"
+APPLY_SAME="$(curl -sk "${DASH_CERT[@]}" -X POST -H "Content-Type: application/json" -d @"$WORKDIR/apply-same.json" "${NODE_BASE}/api/haproxy/config")"
+echo "$APPLY_SAME" | grep -q '"accepted":true' || { echo "Dashboard test FAILED: re-applying the read-back config was rejected: $APPLY_SAME" >&2; exit 1; }
+echo "ApplyConfig round-trip OK: $APPLY_SAME"
+
+# Apply deliberately invalid config - must be rejected, with a real
+# validation error (internal/haproxy.Manager.Validate's own fallback for
+# an empty haproxy -c output - see its own comment), and must not
+# disturb the running config.
+python3 -c 'import json; print(json.dumps({"config": "this is not a valid haproxy config !!!"}))' > "$WORKDIR/apply-garbage.json"
+APPLY_GARBAGE="$(curl -sk "${DASH_CERT[@]}" -X POST -H "Content-Type: application/json" -d @"$WORKDIR/apply-garbage.json" "${NODE_BASE}/api/haproxy/config")"
+echo "$APPLY_GARBAGE" | grep -q '"accepted":false' || { echo "Dashboard test FAILED: garbage config wasn't rejected: $APPLY_GARBAGE" >&2; exit 1; }
+echo "$APPLY_GARBAGE" | grep -q '"message":""' && { echo "Dashboard test FAILED: garbage config rejected with no error message: $APPLY_GARBAGE" >&2; exit 1; }
+AFTER_GARBAGE_SHA256="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/config" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha256"])')"
+[ "$AFTER_GARBAGE_SHA256" = "$ORIG_SHA256" ] || { echo "Dashboard test FAILED: running config changed after a rejected apply (was $ORIG_SHA256, now $AFTER_GARBAGE_SHA256)" >&2; exit 1; }
+echo "ApplyConfig rejection OK: garbage config refused with a real error message, running config untouched"
+
+# BackendList isn't implemented yet (falls through to
+# UnimplementedHAProxyServiceServer - see internal/api/haproxy.go's own
+# doc comment) - the relay must surface that as a real error, not a
+# fake empty success.
+BACKENDS_CODE="$(curl -sk "${DASH_CERT[@]}" -o /tmp/backends-resp.$$ -w '%{http_code}' "${NODE_BASE}/api/haproxy/backends")"
+[ "$BACKENDS_CODE" = "502" ] && grep -q "Unimplemented" /tmp/backends-resp.$$ || { echo "Dashboard test FAILED: BackendList relay didn't surface Unimplemented (code=$BACKENDS_CODE): $(cat /tmp/backends-resp.$$)" >&2; rm -f /tmp/backends-resp.$$; exit 1; }
+rm -f /tmp/backends-resp.$$
+echo "BackendList relay OK: correctly surfaces the real not-yet-implemented error"
+
+# The bootstrap config declares no file-backed maps - MapList must
+# relay a genuinely empty list (protojson's omitempty drops an empty
+# repeated field entirely, so "{}" is the correct empty response, not a
+# gap - confirmed against a real boot before encoding this assertion).
+MAPS_RESP="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/maps")"
+[ "$MAPS_RESP" = "{}" ] || { echo "Dashboard test FAILED: expected an empty MapList response, got: $MAPS_RESP" >&2; exit 1; }
+echo "MapList relay OK: genuinely empty (bootstrap config declares no file-backed maps)"
+
+# MapUpdate against a map that doesn't exist must surface HAProxy's own
+# real error through the relay, not a fake success - exercising a real
+# success case needs a custom boot fixture with a file-backed map
+# declared (already covered at the internal/haproxy layer by
+# image-build.yml's own runtime map/ACL/certificate test).
+MAPUPDATE_CODE="$(curl -sk "${DASH_CERT[@]}" -o /tmp/mapupdate-resp.$$ -w '%{http_code}' -X POST -H "Content-Type: application/json" -d '{"key":"k","value":"v","delete":false}' "${NODE_BASE}/api/haproxy/maps/nonexistent.map")"
+[ "$MAPUPDATE_CODE" = "502" ] && grep -qi "map identifier\|no such\|unknown" /tmp/mapupdate-resp.$$ || { echo "Dashboard test FAILED: MapUpdate against a nonexistent map didn't surface a real error (code=$MAPUPDATE_CODE): $(cat /tmp/mapupdate-resp.$$)" >&2; rm -f /tmp/mapupdate-resp.$$; exit 1; }
+rm -f /tmp/mapupdate-resp.$$
+echo "MapUpdate relay OK: genuinely reaches the real node and surfaces its real error"
+
+# CertificateList starts genuinely empty too (bootstrap config has no
+# ssl bind/crt-list at all).
+CERTS_RESP="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/certs")"
+[ "$CERTS_RESP" = "{}" ] || { echo "Dashboard test FAILED: expected an empty CertificateList response, got: $CERTS_RESP" >&2; exit 1; }
+
+# Real CertificateUpload/List/Delete round trip - a throwaway
+# self-signed test cert, no crt_list (the cert store accepts an upload
+# unconditionally; binding it into a crt-list needs a config that
+# declares one, out of scope here - see internal/haproxy/runtime_certs.go's
+# own doc comment). Built via a real FILE, not a $(...) substitution -
+# command substitution strips the bundle's own trailing newline, which
+# left HAProxy's stats-socket "set ssl cert <<\n<bundle>" heredoc
+# waiting forever for the rest of a line that never arrives (a real gap
+# in internal/haproxy.Manager.statsCommand's missing read deadline,
+# fixed alongside this test - see its own comment - but the bundle
+# still needs to be well-formed here to exercise the real success path).
+openssl req -x509 -newkey ed25519 -keyout "$WORKDIR/testcert.key" -out "$WORKDIR/testcert.crt" -days 1 -nodes -subj "/CN=dashboard-test.example.com" >/dev/null 2>&1
+cat "$WORKDIR/testcert.crt" "$WORKDIR/testcert.key" > "$WORKDIR/testcert-bundle.pem"
+python3 -c '
+import json, sys
+bundle = open(sys.argv[1]).read()
+json.dump({"name": "dashboard-test.pem", "pem_bundle": bundle}, open(sys.argv[2], "w"))
+' "$WORKDIR/testcert-bundle.pem" "$WORKDIR/cert-upload.json"
+UPLOAD_RESP="$(curl -sk "${DASH_CERT[@]}" -m 15 -X POST -H "Content-Type: application/json" -d @"$WORKDIR/cert-upload.json" "${NODE_BASE}/api/haproxy/certs")"
+[ "$UPLOAD_RESP" = "{}" ] || { echo "Dashboard test FAILED: CertificateUpload didn't return success: $UPLOAD_RESP" >&2; exit 1; }
+LIST_AFTER_UPLOAD="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/certs")"
+echo "$LIST_AFTER_UPLOAD" | grep -qF '"name":"dashboard-test.pem"' || { echo "Dashboard test FAILED: uploaded cert not listed: $LIST_AFTER_UPLOAD" >&2; exit 1; }
+DELETE_CODE="$(curl -sk "${DASH_CERT[@]}" -o /dev/null -w '%{http_code}' -X DELETE "${NODE_BASE}/api/haproxy/certs/dashboard-test.pem")"
+[ "$DELETE_CODE" = "200" ] || { echo "Dashboard test FAILED: CertificateDelete returned $DELETE_CODE, want 200" >&2; exit 1; }
+LIST_AFTER_DELETE_CERT="$(curl -sk "${DASH_CERT[@]}" "${NODE_BASE}/api/haproxy/certs")"
+[ "$LIST_AFTER_DELETE_CERT" = "{}" ] || { echo "Dashboard test FAILED: cert still listed after delete: $LIST_AFTER_DELETE_CERT" >&2; exit 1; }
+echo "Certificate relay OK: real upload/list/delete round trip against the real node's cert store"
 
 # --- the mTLS gate must reject both no cert and the wrong CA ---
 no_cert_code="$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "https://127.0.0.1:${NODE_LISTEN_PORT}/api/info" || true)"

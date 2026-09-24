@@ -76,6 +76,7 @@ func Start(node *store.Node, dashboardServerCert tls.Certificate) (*Listener, er
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		handleInfo(w, r, node)
 	})
+	registerOpsRoutes(mux, node)
 	mux.Handle("/", http.FileServerFS(view))
 
 	addr := fmt.Sprintf(":%d", node.Port)

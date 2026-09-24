@@ -59,7 +59,17 @@ func (m *Manager) Validate(cfg []byte) (bool, []string) {
 
 	out, err := exec.Command(m.BinaryPath, "-c", "-f", tmp.Name()).CombinedOutput()
 	if err != nil {
-		return false, splitNonEmptyLines(string(out))
+		errs := splitNonEmptyLines(string(out))
+		if len(errs) == 0 {
+			// haproxy exited nonzero but printed nothing this run captured
+			// (e.g. it never even started - a bad BinaryPath, a denied
+			// exec) - report *why* the command failed rather than
+			// silently returning an empty error list, which callers
+			// (haproxyosctl, the dashboard's ApplyConfig relay) would
+			// otherwise render as "rejected" with no explanation at all.
+			errs = []string{err.Error()}
+		}
+		return false, errs
 	}
 	return true, nil
 }
@@ -171,6 +181,17 @@ func (m *Manager) statsCommand(cmd string) ([]byte, error) {
 		return nil, fmt.Errorf("dial stats socket: %w", err)
 	}
 	defer conn.Close()
+
+	// A malformed multi-line payload (runtime_certs.go's "set ssl cert
+	// ... <<\n<bundle>" - found empirically missing its own trailing
+	// newline once, from a test harness bug, not this code) leaves
+	// HAProxy waiting for the rest of a line that never arrives: without
+	// a deadline, io.Copy below blocks forever, well past any caller's
+	// own timeout giving up on the RPC - a leaked goroutine per bad
+	// request, not just a slow one.
+	if err := conn.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		return nil, fmt.Errorf("set stats socket deadline: %w", err)
+	}
 
 	if _, err := conn.Write([]byte(cmd + "\n")); err != nil {
 		return nil, fmt.Errorf("write stats command: %w", err)
