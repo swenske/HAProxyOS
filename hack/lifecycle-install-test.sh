@@ -103,12 +103,37 @@ QEMU_PID=""
 # single check already having passed and printed. Fixed by killing the
 # real haproxy process by its own pid (haproxyosd's default
 # `-haproxy-pid` path), never by a fuzzy command-line pattern match.
-HAPROXY_PID_FILE="/run/haproxyos/haproxy.pid"
+# cmd/haproxyosd has no SIGTERM handler that propagates to its haproxy
+# child, so killing haproxyosd alone (below) leaves haproxy an orphan,
+# reparented to init, still bound to :8080 - confirmed the hard way on
+# haproxyos-runner01 itself: a real CI run's *next* job started with
+# :8080 already taken, tracked back to a leftover `build/haproxy`
+# process whose start time lined up exactly with this test's own native
+# phase. A first fix tried killing by pid from haproxy's own -p pid
+# file (/run/haproxyos/haproxy.pid) - wrong in a different way:
+# internal/haproxy.Manager's seamless-reload path (-sf <old pid>, taken
+# whenever that pid file already exists from an earlier run of this
+# same test) leaves the *previous* instance to soft-stop-drain rather
+# than exit outright, and repeated local runs showed the pid file can
+# end up missing entirely while multiple old haproxy processes are
+# still very much alive - confirmed by hand: `sudo cat` on the "current"
+# pid file came back "No such file or directory" while `pgrep -x
+# haproxy` still listed several. `pkill -x haproxy` (exact process-name
+# match, not `-f`'s fuzzy full-command-line match - see this file's
+# earlier comment on why `-f` is the wrong tool here) sidesteps needing
+# the pid file at all, confirmed to actually kill a real lingering
+# instance with a plain SIGTERM in well under a second.
+kill_native_haproxy() {
+  sudo pkill -x haproxy 2>/dev/null || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -x haproxy >/dev/null 2>&1 || return 0
+    sleep 0.5
+  done
+  sudo pkill -x -9 haproxy 2>/dev/null || true
+}
 cleanup() {
   [ -n "$HAPROXYOSD_PID" ] && sudo kill "$HAPROXYOSD_PID" 2>/dev/null || true
-  if sudo test -s "$HAPROXY_PID_FILE"; then
-    sudo kill "$(sudo cat "$HAPROXY_PID_FILE")" 2>/dev/null || true
-  fi
+  kill_native_haproxy
   [ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null || true
   # sudo, not plain rm: $WORKDIR/pki is 0700 root-owned
   # (internal/pki.LoadOrBootstrap, run under sudo above).
@@ -181,6 +206,7 @@ echo "Part 3 OK: a second Install onto the same disk was correctly refused"
 sudo kill "$HAPROXYOSD_PID" 2>/dev/null || true
 wait "$HAPROXYOSD_PID" 2>/dev/null || true
 HAPROXYOSD_PID=""
+kill_native_haproxy
 
 # =========================================================================
 # Part 4: boot the installed disk for real and confirm it's genuinely
