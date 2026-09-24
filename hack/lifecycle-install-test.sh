@@ -92,11 +92,27 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(mktemp -d)"
 HAPROXYOSD_PID=""
 QEMU_PID=""
+# Real bug caught by a real CI run, not assumed: this cleanup trap used
+# to kill the native haproxy child with `sudo pkill -f "$HAPROXY_BIN"`
+# (e.g. "build/haproxy") - but `pkill -f` matches the *entire* command
+# line of every process, and this script's own argv (`./hack/
+# lifecycle-install-test.sh ... build/haproxy ...`) contains that exact
+# string as one of its own positional arguments. The trap ended up
+# killing *this script's own process*, mid-trap, right after its very
+# last echo - `make` reported it as "Terminated" (exit 2) despite every
+# single check already having passed and printed. Fixed by killing the
+# real haproxy process by its own pid (haproxyosd's default
+# `-haproxy-pid` path), never by a fuzzy command-line pattern match.
+HAPROXY_PID_FILE="/run/haproxyos/haproxy.pid"
 cleanup() {
   [ -n "$HAPROXYOSD_PID" ] && sudo kill "$HAPROXYOSD_PID" 2>/dev/null || true
-  sudo pkill -f "$HAPROXY_BIN" 2>/dev/null || true
+  if sudo test -s "$HAPROXY_PID_FILE"; then
+    sudo kill "$(sudo cat "$HAPROXY_PID_FILE")" 2>/dev/null || true
+  fi
   [ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null || true
-  rm -rf "$WORKDIR"
+  # sudo, not plain rm: $WORKDIR/pki is 0700 root-owned
+  # (internal/pki.LoadOrBootstrap, run under sudo above).
+  sudo rm -rf "$WORKDIR"
 }
 trap cleanup EXIT
 
