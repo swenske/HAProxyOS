@@ -404,6 +404,19 @@ jobs:
       - name: SystemService stats RPCs return real values from a real boot (dashboard prep)
         run: make qemu-system-info-test
 
+      # Dashboard prep, tranche 2: proves dashboardd (dashboard/backend)
+      # works end to end against a real running node, not a mock - the
+      # whole add-node/list/per-node-mTLS-relay/delete/restart-
+      # persistence flow. The add-node step genuinely calls
+      # GenerateClientConfiguration against the real node with a
+      # provided one-time bootstrap credential and gets back a working,
+      # freshly-issued service credential; the per-node HTTPS listener's
+      # mTLS gate is proven to actually reject both no client cert and a
+      # cert from an unrelated CA, not just accept the right one. See
+      # dashboard/backend and hack/qemu-dashboard-test.sh.
+      - name: Dashboard backend add/list/relay/mTLS-gate/delete/restart against a real node (dashboard prep)
+        run: make qemu-dashboard-test
+
       # Phase 3 cont'd: Secure Boot signing/enforcement is real, proven
       # both directions - a UKI signed with a throwaway test key
       # (image/secureboot/gen-test-key.sh, generated fresh every run,

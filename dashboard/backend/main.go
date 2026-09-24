@@ -1,0 +1,296 @@
+// Command dashboardd is the management dashboard's backend - see the
+// rebranding/dashboard/client-native plan for the full architecture.
+// Serves the SPA + a REST/JSON API for managing the node registry on one
+// plain HTTP port (nothing sensitive transits there - just names/
+// addresses, never a credential), and one dedicated HTTPS listener per
+// registered node (see dashboard/backend/internal/nodeproxy) requiring a
+// TLS client certificate signed by that node's own CA - a browser
+// already holding a valid client cert for that node gets prompted to
+// select it the first time it connects to that node's own port.
+package main
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"sync"
+	"time"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+
+	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
+	"github.com/swenske/HAProxyOS/internal/pki"
+
+	"github.com/swenske/HAProxyOS/dashboard/backend/internal/nodeproxy"
+	"github.com/swenske/HAProxyOS/dashboard/backend/internal/store"
+)
+
+// portRangeStart/End: the pool of per-node listener ports - see the
+// rebranding/dashboard plan's own architecture section for why a
+// dynamic per-node port (not one shared port) is what makes native
+// browser client-certificate selection work per node at all. Docker
+// exposure needs either --network host or a pre-mapped
+// "-p 9500-9599:9500-9599" - documented in dashboard/README.md once
+// that lands (Dockerfile/publishing is a later tranche).
+const (
+	portRangeStart = 9500
+	portRangeEnd   = 9599
+)
+
+func main() {
+	addr := flag.String("addr", ":8080", "main HTTP address (node list, add/remove - never a credential)")
+	dataDir := flag.String("data-dir", "/data", "persistent data directory (Docker volume) - node registry + this dashboard's own TLS identity")
+	flag.Parse()
+
+	st, err := store.Open(*dataDir)
+	if err != nil {
+		log.Fatalf("open store: %v", err)
+	}
+
+	serverCert, err := loadOrCreateDashboardIdentity(*dataDir)
+	if err != nil {
+		log.Fatalf("dashboard TLS identity: %v", err)
+	}
+
+	app := &app{store: st, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
+	for _, n := range st.List() {
+		if err := app.startListener(n); err != nil {
+			// A node whose listener fails to start (e.g. its port is
+			// somehow already taken) stays registered but unreachable -
+			// logged, not fatal, so one bad node doesn't take the whole
+			// dashboard down on restart.
+			log.Printf("node %s (%s): start listener: %v", n.ID, n.Name, err)
+		}
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/nodes", app.handleNodes)
+	mux.HandleFunc("/api/nodes/", app.handleNode)
+
+	log.Printf("dashboardd listening on %s", *addr)
+	log.Fatal(http.ListenAndServe(*addr, mux))
+}
+
+type app struct {
+	store      *store.Store
+	serverCert tls.Certificate
+
+	mu        sync.Mutex
+	listeners map[string]*nodeproxy.Listener
+}
+
+func (a *app) startListener(n *store.Node) error {
+	l, err := nodeproxy.Start(n, a.serverCert)
+	if err != nil {
+		return err
+	}
+	a.mu.Lock()
+	a.listeners[n.ID] = l
+	a.mu.Unlock()
+	return nil
+}
+
+// addNodeRequest is what the "add a node" form (dashboard/frontend,
+// still to come) posts. BootstrapCertPEM/BootstrapKeyPEM are the user's
+// own existing admin credential for the target node - used exactly
+// once, in this same request, to mint this dashboard's own dedicated
+// service credential (see internal/api's GenerateClientConfiguration),
+// then never stored, never logged, never written to disk.
+type addNodeRequest struct {
+	Name             string `json:"name"`
+	Address          string `json:"address"`
+	CACertPEM        string `json:"ca_cert_pem"`
+	BootstrapCertPEM string `json:"bootstrap_cert_pem"`
+	BootstrapKeyPEM  string `json:"bootstrap_key_pem"`
+}
+
+func (a *app) handleNodes(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		type nodeView struct {
+			ID      string `json:"id"`
+			Name    string `json:"name"`
+			Address string `json:"address"`
+			Port    int    `json:"port"`
+		}
+		var out []nodeView
+		for _, n := range a.store.List() {
+			out = append(out, nodeView{ID: n.ID, Name: n.Name, Address: n.Address, Port: n.Port})
+		}
+		writeJSON(w, http.StatusOK, out)
+
+	case http.MethodPost:
+		a.handleAddNode(w, r)
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *app) handleAddNode(w http.ResponseWriter, r *http.Request) {
+	var req addNodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.Address == "" {
+		http.Error(w, "name and address are required", http.StatusBadRequest)
+		return
+	}
+
+	caPEM := []byte(req.CACertPEM)
+	bootstrapCertPEM := []byte(req.BootstrapCertPEM)
+	bootstrapKeyPEM := []byte(req.BootstrapKeyPEM)
+
+	tlsConfig, err := pki.ClientTLSConfig(caPEM, bootstrapCertPEM, bootstrapKeyPEM)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("build TLS config from provided credentials: %v", err), http.StatusBadRequest)
+		return
+	}
+	conn, err := grpc.NewClient(req.Address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("dial %s: %v", req.Address, err), http.StatusBadGateway)
+		return
+	}
+	defer conn.Close()
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	cfg, err := haproxyosv1alpha1.NewSystemServiceClient(conn).GenerateClientConfiguration(ctx, &haproxyosv1alpha1.GenerateClientConfigurationRequest{
+		Roles: []string{pki.RoleAdmin},
+	})
+	if err != nil {
+		http.Error(w, fmt.Sprintf("GenerateClientConfiguration against %s: %v - the provided bootstrap credential couldn't reach or authenticate to that node", req.Address, err), http.StatusBadGateway)
+		return
+	}
+	// req.BootstrapCertPEM/BootstrapKeyPEM are never referenced again
+	// past this point - only cfg's freshly-issued service credential is
+	// persisted below.
+
+	port, err := a.allocatePort()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInsufficientStorage)
+		return
+	}
+
+	node := &store.Node{
+		Name:           req.Name,
+		Address:        req.Address,
+		Port:           port,
+		CACertPEM:      cfg.GetCa(),
+		ServiceCertPEM: cfg.GetCrt(),
+		ServiceKeyPEM:  cfg.GetKey(),
+	}
+	if err := a.store.Add(node); err != nil {
+		http.Error(w, fmt.Sprintf("persist node: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := a.startListener(node); err != nil {
+		http.Error(w, fmt.Sprintf("node registered but its listener failed to start: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, struct {
+		ID   string `json:"id"`
+		Port int    `json:"port"`
+	}{ID: node.ID, Port: node.Port})
+}
+
+func (a *app) handleNode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.URL.Path[len("/api/nodes/"):]
+	if id == "" {
+		http.Error(w, "missing node id", http.StatusBadRequest)
+		return
+	}
+
+	a.mu.Lock()
+	l, ok := a.listeners[id]
+	delete(a.listeners, id)
+	a.mu.Unlock()
+	if ok {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := l.Stop(ctx); err != nil {
+			log.Printf("node %s: stop listener: %v", id, err)
+		}
+	}
+
+	if err := a.store.Remove(id); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// allocatePort returns the first port in [portRangeStart, portRangeEnd]
+// not already used by a registered node - not concurrency-safe against
+// two simultaneous add-node requests racing for the same port (fine for
+// a first slice: this dashboard is a single operator's own tool, not a
+// multi-tenant service).
+func (a *app) allocatePort() (int, error) {
+	used := a.store.UsedPorts()
+	for p := portRangeStart; p <= portRangeEnd; p++ {
+		if !used[p] {
+			return p, nil
+		}
+	}
+	return 0, fmt.Errorf("no free port in [%d, %d] - %d nodes already registered", portRangeStart, portRangeEnd, len(used))
+}
+
+// loadOrCreateDashboardIdentity gives every per-node listener a stable
+// TLS server certificate across restarts (a fresh self-signed identity
+// every restart would mean a new browser trust-warning every time,
+// unrelated to whether anything actually changed). This certificate's
+// own trust has nothing to do with authenticating *callers* - that's the
+// per-node CA check in dashboard/backend/internal/nodeproxy - it only
+// establishes the encrypted channel, so a self-signed one (reusing
+// internal/pki's own CA+Issue machinery rather than writing new crypto
+// code here) is enough for a first slice; a real certificate (or letting
+// the operator supply their own) is a follow-up, not a blocker.
+func loadOrCreateDashboardIdentity(dataDir string) (tls.Certificate, error) {
+	certPath := dataDir + "/dashboard-identity.crt"
+	keyPath := dataDir + "/dashboard-identity.key"
+
+	if certPEM, err := os.ReadFile(certPath); err == nil {
+		keyPEM, err := os.ReadFile(keyPath)
+		if err == nil {
+			return tls.X509KeyPair(certPEM, keyPEM)
+		}
+	}
+
+	ca, err := pki.NewCA("dashboard")
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("generate dashboard identity: %w", err)
+	}
+	certPEM, keyPEM, err := ca.Issue(pki.IssueOptions{
+		CommonName:  "dashboard",
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	})
+	if err != nil {
+		return tls.Certificate{}, fmt.Errorf("issue dashboard server certificate: %w", err)
+	}
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		return tls.Certificate{}, fmt.Errorf("write %s: %w", certPath, err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		return tls.Certificate{}, fmt.Errorf("write %s: %w", keyPath, err)
+	}
+	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}

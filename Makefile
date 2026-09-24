@@ -18,7 +18,7 @@ GEN_DIR := gen
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
 	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test \
-	proxmox-image qemu-system-info-test
+	proxmox-image qemu-system-info-test dashboard-build qemu-dashboard-test
 
 all: build
 
@@ -270,6 +270,21 @@ qemu-lifecycle-rollback-test: build disk-image
 # hack/qemu-system-info-test.sh.
 qemu-system-info-test: build disk-image
 	./hack/qemu-system-info-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
+
+# Dashboard prep, tranche 2: builds dashboardd (dashboard/backend) -
+# lives outside cmd/ (see the rebranding/dashboard/client-native plan:
+# a separate top-level dashboard/ tree, not another control-plane
+# binary) so it isn't part of the $(BINARIES) loop above.
+dashboard-build:
+	mkdir -p $(BIN_DIR)
+	go build -trimpath -o $(BIN_DIR)/dashboardd ./dashboard/backend
+
+# Dashboard prep, tranche 2: proves the dashboard backend's whole
+# add-node/list/per-node-mTLS-relay/delete/restart-persistence flow
+# works against a real running node, not a mock - see
+# dashboard/backend and hack/qemu-dashboard-test.sh.
+qemu-dashboard-test: dashboard-build disk-image
+	./hack/qemu-dashboard-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/dashboardd
 
 # Phase 3 cont'd: proves Secure Boot signing/enforcement actually works,
 # both directions - a UKI signed with a throwaway test key (image/
