@@ -126,11 +126,52 @@
 #   # else, not assumed from CONFIG_INET/CONFIG_NET already being on.
 #   CONFIG_SYN_COOKIES=y
 #
+#   # Phase 4 cont'd: SELinux kernel enablement (no policy compiled or
+#   # loaded yet - this slice is deliberately just "the kernel can do
+#   # SELinux", proven by a real boot showing the LSM initialize, not
+#   # "HAProxyOS enforces a policy" - see docs/architecture.md for the
+#   # actual policy/loading work still open). CONFIG_SECURITY_SELINUX
+#   # itself `depends on SECURITY_NETWORK && AUDIT && NET && INET` in
+#   # this kernel version - AUDIT wasn't just missing, it was explicitly
+#   # `# CONFIG_AUDIT is not set` before this, found by grepping the
+#   # real Kconfig dependency line rather than assumed from memory.
+#   # AUDIT's own `select`-driven AUDITSYSCALL/FSNOTIFY, and SELinux's
+#   # own `select NETWORK_SECMARK`, come along automatically - verified
+#   # via a full resolved-config diff, same discipline as every other
+#   # symbol in this file, and equally clean: no other LSM (smack/
+#   # apparmor/tomoyo) got pulled in, no XFRM/IPSec surface either.
+#   CONFIG_AUDIT=y CONFIG_SECURITY_NETWORK=y CONFIG_SECURITY_SELINUX=y
+#   # SELINUX_DEVELOP keeps the kernel bootable in permissive mode
+#   # (log, don't deny) unless `enforcing=1` is on the cmdline - exactly
+#   # what this slice needs, since there's no policy to enforce yet.
+#   # SELINUX_BOOTPARAM adds a `selinux=0` escape hatch on the kernel
+#   # cmdline - not for production use (the cmdline is baked into the
+#   # UKI permanently at build time, there's no boot menu to edit it
+#   # from on a running node), but it lets hack/qemu-*-test.sh's plain
+#   # `-kernel`/`-append` boots (which don't go through a UKI at all)
+#   # disable SELinux for a specific test run without a second kernel
+#   # build, the same role CONFIG_SECURITY_SELINUX_DEVELOP's permissive
+#   # default already plays for cmdline-less UKI boots.
+#   CONFIG_SECURITY_SELINUX_DEVELOP=y CONFIG_SECURITY_SELINUX_BOOTPARAM=y
+#   # xattr support on both filesystems that will ever hold a labeled
+#   # file: the read-only squashfs rootfs (SQUASHFS_XATTR - mksquashfs
+#   # already preserves xattrs set on source files by default, so this
+#   # is the only kernel-side piece needed for that half) and the
+#   # writable ext4 STATE partition (EXT4_FS_SECURITY - distinct from
+#   # EXT4_FS_POSIX_ACL, which is unrelated and still off).
+#   CONFIG_SQUASHFS_XATTR=y CONFIG_EXT4_FS_SECURITY=y
+#   # "selinux" added to the ordered LSM list (still no-op without a
+#   # loaded policy) - inserted in the same relative position the
+#   # kernel's own un-customized CONFIG_LSM default uses.
+#   CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,ipe,bpf"
+#
 # Deliberately the FULL resolved config (every symbol explicit), not a
 # compact savedefconfig diff: a diff format resolves unlisted symbols
 # against the kernel's own defconfig-derived defaults, which would
 # silently re-enable drivers allnoconfig turned off. See
-# ../../docs/architecture.md for what's still not in here (SELinux).
+# ../../docs/architecture.md for what's still open (a real SELinux
+# policy, and the boot-time mechanism to load one - the kernel side
+# alone, proven here, behaves identically to SELinux being absent).
 #
 # Automatically generated file; DO NOT EDIT (by hand - it's fine to
 # regenerate it via the workflow above).
@@ -190,8 +231,9 @@ CONFIG_DEFAULT_HOSTNAME="(none)"
 # CONFIG_POSIX_MQUEUE is not set
 # CONFIG_WATCH_QUEUE is not set
 # CONFIG_CROSS_MEMORY_ATTACH is not set
-# CONFIG_AUDIT is not set
+CONFIG_AUDIT=y
 CONFIG_HAVE_ARCH_AUDITSYSCALL=y
+CONFIG_AUDITSYSCALL=y
 
 #
 # IRQ subsystem
@@ -988,7 +1030,7 @@ CONFIG_IPV6_NDISC_NODETYPE=y
 # CONFIG_IPV6_IOAM6_LWTUNNEL is not set
 # CONFIG_NETLABEL is not set
 # CONFIG_MPTCP is not set
-# CONFIG_NETWORK_SECMARK is not set
+CONFIG_NETWORK_SECMARK=y
 CONFIG_NET_PTP_CLASSIFY=y
 # CONFIG_NETWORK_PHY_TIMESTAMPING is not set
 # CONFIG_NETFILTER is not set
@@ -1333,6 +1375,7 @@ CONFIG_DM_VERITY=y
 # CONFIG_DM_SWITCH is not set
 # CONFIG_DM_LOG_WRITES is not set
 # CONFIG_DM_INTEGRITY is not set
+# CONFIG_DM_AUDIT is not set
 # CONFIG_DM_VDO is not set
 # CONFIG_TARGET_CORE is not set
 # CONFIG_FUSION is not set
@@ -2118,7 +2161,7 @@ CONFIG_LEGACY_DIRECT_IO=y
 CONFIG_EXT4_FS=y
 CONFIG_EXT4_USE_FOR_EXT2=y
 # CONFIG_EXT4_FS_POSIX_ACL is not set
-# CONFIG_EXT4_FS_SECURITY is not set
+CONFIG_EXT4_FS_SECURITY=y
 # CONFIG_EXT4_DEBUG is not set
 CONFIG_JBD2=y
 # CONFIG_JBD2_DEBUG is not set
@@ -2134,6 +2177,7 @@ CONFIG_EXPORTFS=y
 CONFIG_FILE_LOCKING=y
 # CONFIG_FS_ENCRYPTION is not set
 # CONFIG_FS_VERITY is not set
+CONFIG_FSNOTIFY=y
 # CONFIG_DNOTIFY is not set
 # CONFIG_INOTIFY_USER is not set
 # CONFIG_FANOTIFY is not set
@@ -2209,7 +2253,7 @@ CONFIG_SQUASHFS_DECOMP_SINGLE=y
 CONFIG_SQUASHFS_COMPILE_DECOMP_SINGLE=y
 # CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI is not set
 # CONFIG_SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU is not set
-# CONFIG_SQUASHFS_XATTR is not set
+CONFIG_SQUASHFS_XATTR=y
 # CONFIG_SQUASHFS_COMP_CACHE_FULL is not set
 CONFIG_SQUASHFS_ZLIB=y
 # CONFIG_SQUASHFS_LZ4 is not set
@@ -2231,6 +2275,7 @@ CONFIG_SQUASHFS_FRAGMENT_CACHE_SIZE=3
 # CONFIG_EROFS_FS is not set
 CONFIG_NETWORK_FILESYSTEMS=y
 # CONFIG_NFS_FS is not set
+# CONFIG_NFSD is not set
 # CONFIG_CEPH_FS is not set
 # CONFIG_CIFS is not set
 # CONFIG_SMB_SERVER is not set
@@ -2301,10 +2346,19 @@ CONFIG_PROC_MEM_ALWAYS_FORCE=y
 # CONFIG_PROC_MEM_NO_FORCE is not set
 # CONFIG_MSEAL_SYSTEM_MAPPINGS is not set
 CONFIG_SECURITY=y
+CONFIG_HAS_SECURITY_AUDIT=y
 # CONFIG_SECURITYFS is not set
-# CONFIG_SECURITY_NETWORK is not set
+CONFIG_SECURITY_NETWORK=y
 # CONFIG_SECURITY_PATH is not set
+CONFIG_LSM_MMAP_MIN_ADDR=65536
 # CONFIG_STATIC_USERMODEHELPER is not set
+CONFIG_SECURITY_SELINUX=y
+CONFIG_SECURITY_SELINUX_BOOTPARAM=y
+CONFIG_SECURITY_SELINUX_DEVELOP=y
+CONFIG_SECURITY_SELINUX_AVC_STATS=y
+CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS=9
+CONFIG_SECURITY_SELINUX_SID2STR_CACHE_SIZE=256
+# CONFIG_SECURITY_SELINUX_DEBUG is not set
 # CONFIG_SECURITY_SMACK is not set
 # CONFIG_SECURITY_TOMOYO is not set
 # CONFIG_SECURITY_APPARMOR is not set
@@ -2315,11 +2369,13 @@ CONFIG_SECURITY_YAMA=y
 # CONFIG_SECURITY_LANDLOCK is not set
 CONFIG_INTEGRITY=y
 # CONFIG_INTEGRITY_SIGNATURE is not set
+CONFIG_INTEGRITY_AUDIT=y
 # CONFIG_IMA is not set
 # CONFIG_IMA_SECURE_AND_OR_TRUSTED_BOOT is not set
 # CONFIG_EVM is not set
+# CONFIG_DEFAULT_SECURITY_SELINUX is not set
 CONFIG_DEFAULT_SECURITY_DAC=y
-CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,ipe,bpf"
+CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,selinux,ipe,bpf"
 
 #
 # Kernel hardening options

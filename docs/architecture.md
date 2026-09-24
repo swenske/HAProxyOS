@@ -843,16 +843,50 @@ plan - not implemented yet.
   fails on any sysctl write that logged an error at all, expected or
   not - a passing HTTP check and a clean-looking boot log both proved
   insufficient on their own to catch the real `tcp_syncookies` gap.
-  Still open: SELinux policy - a much larger, more specialized
-  undertaking (writing type-enforcement rules for a from-scratch OS
-  with no existing distro policy to build on), and one whose marginal
-  value here is genuinely smaller than usual, given how much of what
-  SELinux typically defends against (arbitrary shell/code execution,
-  package tampering) this project's architecture already eliminates
-  structurally (no shell, no package manager, dm-verity-verified
-  read-only root) - deferred, not because it's uninteresting, but
-  because the kernel/CIS pass above was the clearer, more tractable
-  starting point.
+  SELinux, first slice: kernel-side enablement only, deliberately
+  scoped small and separate from writing an actual policy (a much
+  larger, more specialized undertaking - type-enforcement rules for a
+  from-scratch OS with no existing distro policy to build on - and one
+  whose marginal value here is genuinely smaller than usual, given how
+  much of what SELinux typically defends against, arbitrary shell/code
+  execution and package tampering, this project's architecture already
+  eliminates structurally: no shell, no package manager, dm-verity-
+  verified read-only root). `CONFIG_SECURITY_SELINUX` turned out to
+  `depend on SECURITY_NETWORK && AUDIT && NET && INET` in this kernel
+  version - `CONFIG_AUDIT` wasn't just missing, it was explicitly
+  unset, found by grepping the real dependency line rather than
+  assumed - and pulling it in brought `AUDITSYSCALL`/`FSNOTIFY` along
+  automatically via their own `select`s, same as `NETWORK_SECMARK`
+  came along via SELinux's own. Verified via the same full-resolved-
+  config-diff discipline as every prior Kconfig change: no other LSM
+  (smack/apparmor/tomoyo) and no XFRM/IPSec surface got pulled in
+  alongside it. Both filesystems that will ever hold a labeled file
+  got their xattr support turned on too - `SQUASHFS_XATTR` for the
+  read-only rootfs (`mksquashfs` already preserves source-file xattrs
+  by default, so this is the only kernel-side piece that read-only
+  half needs) and `EXT4_FS_SECURITY` for the writable STATE partition
+  (distinct from the still-off `EXT4_FS_POSIX_ACL`) - though nothing
+  writes a `security.selinux` xattr onto either filesystem yet, since
+  there's no policy to derive one from. `SECURITY_SELINUX_DEVELOP`
+  keeps the kernel in permissive mode (log, don't deny) by default,
+  exactly right for a slice with no policy to enforce;
+  `SECURITY_SELINUX_BOOTPARAM` adds a `selinux=0` cmdline escape hatch
+  for the plain `-kernel`/`-append` boot tests (not for a real UKI
+  boot - the cmdline there is baked in permanently at build time, no
+  boot menu to edit it from). Proven on a real boot, not assumed from
+  the Kconfig alone: the console log shows `LSM: initializing
+  lsm=capability,yama,selinux` and `SELinux:  Initializing.`, and
+  `make qemu-network-test`/`qemu-hardening-test`/`qemu-verity-boot-
+  test`/`qemu-state-persist-test` all still pass unchanged - the new
+  LSM, with no policy loaded, is currently a true no-op. Still open,
+  and the actual substance of SELinux support: a real minimal policy
+  (hand-written for this project's own two real binaries, not an
+  adapted refpolicy - refpolicy assumes a systemd/udev-shaped distro
+  this project structurally isn't), a way to compile it at build time
+  (`checkpolicy`/CIL tooling isn't in any build container yet), and a
+  boot-time loading mechanism in `rootfs/init` (no `libselinux`/
+  `load_policy` userspace here - would mean writing the compiled
+  binary policy straight to `/sys/fs/selinux/load` by hand).
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
   (separate container from the runner) + remote kernel-menuconfig UI -
