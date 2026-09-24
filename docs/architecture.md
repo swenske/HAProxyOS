@@ -1018,6 +1018,21 @@ plan - not implemented yet.
   `qemu-secureboot-test` - was re-run locally after the fix and passes
   clean under real `enforcing=1`, not just the original
   `hack/qemu-selinux-test.sh` boot.
+- **First alpha artifact** (before Phase 5): `image/kvm-proxmox/
+  assemble.sh` converts `image/disk/assemble.sh`'s real, single-disk
+  GPT image to qcow2 (`qemu-img convert -c`) - Proxmox's own preferred
+  import/storage format. `image-build.yml`'s "Build an alpha Proxmox VM
+  image" step builds one on every manual run and uploads it as a
+  workflow artifact. Unsigned (Proxmox's OVMF has no cert of this
+  project's own enrolled by default, so Secure Boot has to stay off in
+  the VM's EFI disk settings regardless of whether the UKI itself is
+  signed). Verified against the actual built qcow2, not just the raw
+  image before conversion - real OVMF boot under `-machine q35`
+  (Proxmox's own machine type), zero AVC denials under the now-default
+  `enforcing=1`, real HTTP 200. See `image/kvm-proxmox/README.md` for
+  the exact `qm create`/`qm importdisk` steps - needs `--serial0
+  socket --vga serial0` specifically, since this rootfs has no VGA
+  console at all, only serial.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
   (separate container from the runner) + remote kernel-menuconfig UI -

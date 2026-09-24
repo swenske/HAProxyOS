@@ -37,7 +37,7 @@ jobs:
       - name: Install QEMU + rootfs build tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq qemu-system-x86 squashfs-tools cryptsetup-bin e2fsprogs gdisk \
+          sudo apt-get install -y -qq qemu-system-x86 qemu-utils squashfs-tools cryptsetup-bin e2fsprogs gdisk \
             ovmf systemd-ukify mtools dosfstools sbsigntool python3-virt-firmware
 
       # Phase 1: builds bzImage (kernel/Dockerfile's fetch -> config ->
@@ -582,7 +582,30 @@ jobs:
           sbverify --cert image/secureboot/production-cert.pem build/release-signed/uki-b.efi
           echo "Both slots' UKIs are validly signed with the production key and verify against image/secureboot/production-cert.pem"
 
-      # TODO(Phase 3 cont'd): image/iso, image/kvm-proxmox, image/vmware,
-      # upload artifacts to a GitHub Release.
+      # First real, deployable artifact: image/disk/assemble.sh's single
+      # GPT disk (ESP + both A/B slots + STATE - the exact same shape
+      # every UEFI boot test above already proved works end to end,
+      # including under enforcing=1) converted to qcow2, Proxmox's own
+      # preferred import/storage format (image/kvm-proxmox/assemble.sh).
+      # Unsigned - Proxmox's own OVMF doesn't have this project's
+      # production Secure Boot cert enrolled, so Secure Boot needs to be
+      # off in the VM's EFI Disk settings regardless of whether the UKI
+      # itself is signed; signing this too would add nothing an alpha
+      # tester could actually use yet. Uploaded as a workflow artifact -
+      # not a GitHub Release (no version scheme decided yet, this is
+      # still a manually-triggered alpha, not a tagged release build).
+      - name: Build an alpha Proxmox VM image (qcow2)
+        run: |
+          make proxmox-image
+          ls -lh build/haproxyos.qcow2
+      - name: Upload the alpha Proxmox VM image
+        uses: actions/upload-artifact@v4
+        with:
+          name: haproxyos-alpha-${{ github.sha }}
+          path: build/haproxyos.qcow2
+          retention-days: 30
+
+      # TODO(Phase 3 cont'd): image/iso, image/vmware, upload artifacts
+      # to a GitHub Release once a version scheme exists.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

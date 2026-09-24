@@ -17,7 +17,8 @@ GEN_DIR := gen
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
-	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test
+	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test \
+	proxmox-image
 
 all: build
 
@@ -221,6 +222,14 @@ qemu-state-persist-test: kernel-build rootfs-build state-image
 # groundwork for a real LifecycleService.Upgrade/Rollback).
 disk-image: kernel-build rootfs-build state-image
 	./image/disk/assemble.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage \
+		$(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img A
+
+# First real, deployable artifact: disk-image's raw GPT disk converted
+# to qcow2 - Proxmox's own preferred import/storage format. Requires
+# qemu-img on top of disk-image's own tools. See
+# image/kvm-proxmox/assemble.sh.
+proxmox-image: kernel-build rootfs-build state-image
+	./image/kvm-proxmox/assemble.sh $(BUILD_DIR)/haproxyos.qcow2 $(BUILD_DIR)/bzImage \
 		$(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img A
 
 # Phase 3 cont'd: proves both A/B slots of disk-image's single GPT disk
