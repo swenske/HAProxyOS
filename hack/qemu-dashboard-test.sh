@@ -113,6 +113,12 @@ if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
   exit 1
 fi
 
+# --- the main SPA (dashboard/frontend, go:embed'd) must actually be
+# served, not just the REST API ---
+MAIN_UI="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/")"
+echo "$MAIN_UI" | grep -q '<div id="root">' || { echo "Dashboard test FAILED: main SPA index.html not served at /: $MAIN_UI" >&2; exit 1; }
+echo "Main SPA OK: dashboard/frontend's built index.html is served at /"
+
 # dashboardd allocates the first free port in its own pool - pin it low
 # for this test by patching the request's own expectations rather than
 # the binary: read back whatever port it actually picked.
@@ -157,6 +163,13 @@ echo "$INFO" | grep -q '"active_slot":"A"' || { echo "Dashboard test FAILED: rel
 mem_total="$(echo "$INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["memory"]["total_bytes"])')"
 [ "$mem_total" -gt 0 ] || { echo "Dashboard test FAILED: relayed memory total_bytes was 0" >&2; exit 1; }
 echo "Relay OK: real data (kernel_version, active_slot=A, memory=${mem_total} bytes) genuinely round-tripped through the dashboard to the real node and back"
+
+# --- the per-node view (nodeproxy's own go:embed'd static/index.html,
+# not the main SPA) must actually be served, mTLS-gated the same way
+# /api/info is ---
+NODE_UI="$(curl -sk --cert "$WORKDIR/admin.crt" --key "$WORKDIR/admin.key" "https://127.0.0.1:${NODE_LISTEN_PORT}/")"
+echo "$NODE_UI" | grep -q '<title>HAProxyOS Node</title>' || { echo "Dashboard test FAILED: per-node dashboard page not served at /: $NODE_UI" >&2; exit 1; }
+echo "Per-node UI OK: nodeproxy's own dashboard page is served at / behind the same mTLS gate as /api/info"
 
 # --- the mTLS gate must reject both no cert and the wrong CA ---
 no_cert_code="$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "https://127.0.0.1:${NODE_LISTEN_PORT}/api/info" || true)"

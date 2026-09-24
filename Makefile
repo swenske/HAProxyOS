@@ -18,7 +18,8 @@ GEN_DIR := gen
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
 	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test \
-	proxmox-image qemu-system-info-test dashboard-build qemu-dashboard-test
+	proxmox-image qemu-system-info-test dashboard-frontend-build dashboard-build \
+	qemu-dashboard-test
 
 all: build
 
@@ -275,7 +276,16 @@ qemu-system-info-test: build disk-image
 # lives outside cmd/ (see the rebranding/dashboard/client-native plan:
 # a separate top-level dashboard/ tree, not another control-plane
 # binary) so it isn't part of the $(BINARIES) loop above.
-dashboard-build:
+# Builds dashboard/frontend's React SPA straight into dashboard/backend/
+# static (vite.config.js's own outDir) - go:embed needs it there at `go
+# build` time. Requires npm. The build output is committed to the repo
+# (like gen/haproxyos/v1alpha1) so a plain `go build ./...` never needs
+# a Node.js toolchain just to compile - this target is for actually
+# picking up frontend source changes.
+dashboard-frontend-build:
+	cd dashboard/frontend && npm ci && npm run build
+
+dashboard-build: dashboard-frontend-build
 	mkdir -p $(BIN_DIR)
 	go build -trimpath -o $(BIN_DIR)/dashboardd ./dashboard/backend
 

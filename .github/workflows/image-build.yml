@@ -40,6 +40,19 @@ jobs:
           sudo apt-get install -y -qq qemu-system-x86 qemu-utils squashfs-tools cryptsetup-bin e2fsprogs gdisk \
             ovmf systemd-ukify mtools dosfstools sbsigntool python3-virt-firmware
 
+      # dashboard/frontend (Vite 8) needs Node >=20.19 - Debian's own
+      # default `nodejs` apt package version isn't reliably that recent,
+      # so NodeSource's own setup script is used instead of a plain
+      # `apt-get install nodejs npm`, the same reasoning every other
+      # tool-version pin in this project follows (verify what's actually
+      # available rather than assume a distro package is recent enough).
+      - name: Install Node.js (dashboard/frontend build)
+        run: |
+          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+          sudo apt-get install -y -qq nodejs
+          node --version
+          npm --version
+
       # Phase 1: builds bzImage (kernel/Dockerfile's fetch -> config ->
       # build -> export stages) + the init-only initramfs (rootfs/init,
       # hack/build-initramfs.sh - no pkgs/musl-toolchain or pkgs/busybox

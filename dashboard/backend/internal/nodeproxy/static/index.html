@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HAProxyOS Node</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; }
+  th, td { text-align: left; padding: 0.4rem; border-bottom: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
+  h2 { font-size: 1rem; margin-top: 2rem; }
+  .error { color: #b3261e; }
+  .stale { opacity: 0.5; }
+</style>
+</head>
+<body>
+<h1 id="title">HAProxyOS Node</h1>
+<div id="error" class="error"></div>
+<table id="version"></table>
+<h2>Memory</h2>
+<table id="memory"></table>
+<h2>CPUs</h2>
+<table id="cpus"></table>
+<h2>Load average</h2>
+<table id="load"></table>
+<h2>Disks</h2>
+<table id="disks"></table>
+<script>
+// This is the *entire* per-node dashboard view - deliberately plain
+// HTML/JS, no build step, no framework: it does one thing (poll
+// /api/info, same origin, and render it), embedded straight into
+// dashboardd's binary (see dashboard/backend/internal/nodeproxy.go's
+// own go:embed) and served on this node's own dedicated mTLS-gated
+// port. The main dashboard's own React SPA (dashboard/frontend) lives
+// on a completely different origin and can't fetch this one directly -
+// see nodeproxy.go's package doc comment for why.
+const REFRESH_MS = 5000
+
+function row(label, value) {
+  return `<tr><td>${label}</td><td>${value}</td></tr>`
+}
+
+function bytesToMiB(n) {
+  return (n / 1024 / 1024).toFixed(1) + ' MiB'
+}
+
+async function refresh() {
+  const errorEl = document.getElementById('error')
+  try {
+    const resp = await fetch('/api/info')
+    if (!resp.ok) throw new Error(await resp.text())
+    const info = await resp.json()
+    errorEl.textContent = ''
+
+    document.getElementById('version').innerHTML =
+      row('Version', info.version) +
+      row('Go version', info.go_version) +
+      row('Kernel version', info.kernel_version) +
+      row('Active slot', info.active_slot || '(not an A/B boot)')
+
+    document.getElementById('memory').innerHTML =
+      row('Total', bytesToMiB(info.memory.total_bytes)) +
+      row('Available', bytesToMiB(info.memory.available_bytes)) +
+      row('Cached', bytesToMiB(info.memory.cached_bytes))
+
+    document.getElementById('cpus').innerHTML = info.cpus
+      .map((c) => row(`CPU ${c.processor}`, `${c.model_name} (${c.mhz.toFixed(0)} MHz)`))
+      .join('')
+
+    document.getElementById('load').innerHTML =
+      row('1 / 5 / 15 min', `${info.load_avg.load1.toFixed(2)} / ${info.load_avg.load5.toFixed(2)} / ${info.load_avg.load15.toFixed(2)}`)
+
+    document.getElementById('disks').innerHTML = info.disks
+      .map((d) => row(d.device_name, `reads=${d.read_completed} writes=${d.write_completed}`))
+      .join('')
+  } catch (err) {
+    errorEl.textContent = String(err)
+  }
+}
+
+refresh()
+setInterval(refresh, REFRESH_MS)
+</script>
+</body>
+</html>

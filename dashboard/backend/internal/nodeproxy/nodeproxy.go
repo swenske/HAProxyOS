@@ -19,8 +19,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"embed"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"time"
 
@@ -33,6 +35,15 @@ import (
 
 	"github.com/swenske/HAProxyOS/dashboard/backend/internal/store"
 )
+
+// staticFiles is the entire per-node dashboard view - deliberately
+// plain HTML/JS, no build step, no framework (unlike dashboard/
+// frontend's own React SPA, which lives on a completely different
+// origin - see this package's own doc comment for why the two can't
+// just be the same thing).
+//
+//go:embed static
+var staticFiles embed.FS
 
 // Listener is one running per-node HTTPS endpoint.
 type Listener struct {
@@ -56,10 +67,16 @@ func Start(node *store.Node, dashboardServerCert tls.Certificate) (*Listener, er
 		MinVersion:   tls.VersionTLS13,
 	}
 
+	view, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		return nil, fmt.Errorf("static assets: %w", err)
+	}
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/info", func(w http.ResponseWriter, r *http.Request) {
 		handleInfo(w, r, node)
 	})
+	mux.Handle("/", http.FileServerFS(view))
 
 	addr := fmt.Sprintf(":%d", node.Port)
 	ln, err := tls.Listen("tcp", addr, tlsConfig)
