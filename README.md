@@ -22,6 +22,9 @@ and [`docs/api-routes.md`](docs/api-routes.md) for the gRPC API catalog.
 - `internal/api/` - gRPC service implementations.
 - `kernel/`, `pkgs/`, `rootfs/`, `image/` - the from-scratch OS build
   system (Dockerfile-per-component, Talos-`pkgs`-style).
+- `dashboard/` - the management dashboard (web UI for one or more
+  nodes). See [`dashboard/README.md`](dashboard/README.md) to build and
+  run it locally.
 - `hack/` - local dev tooling (QEMU test harness).
 
 ## Building the control plane
