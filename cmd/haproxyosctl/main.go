@@ -111,7 +111,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
 	fmt.Fprintln(os.Stderr, "  lifecycle rollback         switch the ESP to the other A/B slot's staged UKI and reboot into it")
-	fmt.Fprintln(os.Stderr, "  lifecycle upgrade [-sha256 HEX] BUNDLE_DIR  write a release bundle (image/release/assemble.sh) to the inactive slot, switch, and reboot into it")
+	fmt.Fprintln(os.Stderr, "  lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR  write a release bundle (image/release/assemble.sh) to the inactive slot, switch, and reboot into it - with -wait-for-health, reverts and reboots back automatically if the new slot never stays up long enough to confirm healthy")
 }
 
 func ctx() (context.Context, context.CancelFunc) {
@@ -197,9 +197,11 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 	case "upgrade":
 		fs := flag.NewFlagSet("lifecycle upgrade", flag.ExitOnError)
 		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
+		waitForHealth := fs.Bool("wait-for-health", false, "revert and reboot back to the current slot automatically if the new slot doesn't stay up long enough to confirm healthy (see -health-timeout) - the revert itself happens on the node, not over this call, which still returns as soon as it reboots")
+		healthTimeout := fs.Uint("health-timeout", 0, "seconds the new slot's haproxyosd has to keep running before it's considered healthy and the upgrade is confirmed; 0 uses the node's own default (60s) - only meaningful with -wait-for-health")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 1 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle upgrade [-sha256 HEX] BUNDLE_DIR")
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR")
 			os.Exit(2)
 		}
 		bundleDir := fs.Arg(0)
@@ -213,11 +215,15 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		// Longer than ctx()'s default 10s - Upgrade writes the new
 		// rootfs.squashfs/rootfs.verity to a partition device directly,
 		// still fast for this project's image sizes, but no reason to
-		// cut it close.
+		// cut it close. Not related to -health-timeout at all: this
+		// call returns once the node reboots, well before any health
+		// confirmation (or possible revert) happens on a later boot.
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 		stream, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Upgrade(c, &haproxyosv1alpha1.UpgradeRequest{
-			Source: &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+			Source:               &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+			WaitForHealth:        *waitForHealth,
+			HealthTimeoutSeconds: uint32(*healthTimeout),
 		})
 		if err != nil {
 			log.Fatalf("Upgrade: %v", err)

@@ -414,16 +414,48 @@ jobs:
       - name: LifecycleService.Upgrade installs a genuinely new rootfs for real (Phase 3 cont'd)
         run: make qemu-lifecycle-upgrade-test
 
+      # Phase 3 cont'd: wait_for_health is real - a pending
+      # "boot pending confirmation" marker (internal/bootcommit),
+      # written to STATE right before the ESP switch, is what the
+      # *next* boot's rootfs/init checks. A healthy new slot confirms
+      # itself once haproxyosd has run stably (Supervisor.OnStable, the
+      # same "survived StableAfter" signal the existing backoff-reset
+      # already tracked, just fired proactively via its own timer
+      # instead of retroactively off an eventual exit) and the marker
+      # is cleared - no revert. An unhealthy one - haproxyosd
+      # crash-looping without ever reaching that point - is bounded by
+      # a new Supervisor.GiveUpAfter/OnGiveUp pair (the *one* documented
+      # exception to this package's otherwise-unconditional "restart
+      # forever" policy, only active when a marker is pending) that
+      # reverts to the previously-active slot and reboots entirely on
+      # its own - no RPC call drives the revert, since the original
+      # Upgrade call's connection died with the first reboot already.
+      # Both the confirm and revert paths share one ESP-swap primitive,
+      # internal/espswitch.Activate, factored out of Rollback's own
+      # inline logic once rootfs/init's local revert became a second
+      # real consumer of it. hack/qemu-lifecycle-upgrade-health-test.sh
+      # proves both directions against the same running node: a "good"
+      # upgrade (the existing v1 rootfs, repackaged) must confirm and
+      # never revert; a "broken" one (a fresh rootfs built with the
+      # host's own dynamically-linked /bin/false standing in for
+      # haproxyosd - this rootfs ships no dynamic linker/libc at all, so
+      # every restart attempt fails at spawn() itself, a realistic
+      # simulation of a badly built or wrong-architecture control-plane
+      # binary) must reboot into it, then autonomously give up, revert,
+      # and reboot back to whichever slot was actually active when the
+      # broken Upgrade was called - not a hardcoded fallback.
+      - name: LifecycleService.Upgrade's wait_for_health confirms or reverts automatically (Phase 3 cont'd)
+        run: make qemu-lifecycle-upgrade-health-test
+
       # TODO(Phase 3 cont'd): image/iso, image/kvm-proxmox, image/vmware,
       # LifecycleService.Install (bare-metal provisioning of a fresh,
       # unpartitioned disk - needs a Go-native GPT/FAT builder, since
       # sgdisk/mtools/ukify don't exist on the target OS any more than
       # they do at runtime for Rollback/Upgrade, and unlike those two,
-      # Install has no existing partition table to build on),
-      # Upgrade's wait_for_health + automatic rollback-on-unhealthy-boot
-      # (needs a persistent "boot pending confirmation" marker on STATE
-      # the next boot checks and clears, or reverts if it never does -
-      # none of that bookkeeping exists yet), a real signing key for
+      # Install has no existing partition table to build on), a real
+      # HAProxy-level health check feeding into wait_for_health (today
+      # it's daemon-survival only - haproxyosd started and kept running,
+      # nothing about HAProxy's own state), a real signing key for
       # Secure Boot (image/secureboot/gen-test-key.sh is explicitly a
       # throwaway test key, not a production one - real key management
       # is a separate, unaddressed concern), upload artifacts to a

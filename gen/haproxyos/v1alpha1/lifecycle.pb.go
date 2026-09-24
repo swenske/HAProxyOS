@@ -251,10 +251,15 @@ func (x *UpgradeRequest) GetHealthTimeoutSeconds() uint32 {
 }
 
 type UpgradeResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stage         string                 `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"` // e.g. "writing", "verifying", "switching-slot", "rebooting", "health-check", "rolled-back"
-	Progress      float64                `protobuf:"fixed64,2,opt,name=progress,proto3" json:"progress,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// e.g. "verifying", "writing-data", "writing-hash", "switching-slot",
+	// "rebooting" - the last stage this stream ever sends. Confirmation
+	// and any eventual revert happen on a later boot, outside this RPC
+	// entirely (see Upgrade's own comment above), so no stage value for
+	// either is ever streamed here.
+	Stage         string  `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"`
+	Progress      float64 `protobuf:"fixed64,2,opt,name=progress,proto3" json:"progress,omitempty"`
+	Message       string  `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

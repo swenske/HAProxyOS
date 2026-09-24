@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -15,7 +16,9 @@ import (
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
+	"github.com/swenske/HAProxyOS/internal/bootcommit"
 	"github.com/swenske/HAProxyOS/internal/bootslot"
+	"github.com/swenske/HAProxyOS/internal/espswitch"
 )
 
 // Lifecycle implements haproxyosv1alpha1.LifecycleServiceServer. Install
@@ -39,12 +42,6 @@ import (
 type Lifecycle struct {
 	haproxyosv1alpha1.UnimplementedLifecycleServiceServer
 }
-
-// espMountpoint is under /run, which rootfs/init/main.go's
-// mountEphemeral already made a fresh tmpfs - nothing pre-existing
-// there needs preserving, unlike /etc (see that function's own doc
-// comment).
-const espMountpoint = "/run/haproxyos/esp"
 
 // Fixed partition sizes, matching image/disk/assemble.sh's own
 // DATA_MB/HASH_MB - Upgrade enforces the same limits that script does
@@ -98,22 +95,6 @@ func resolveBootContext() (*bootContext, error) {
 	}, nil
 }
 
-func mountESP(espDev string) error {
-	if err := os.MkdirAll(espMountpoint, 0o755); err != nil {
-		return fmt.Errorf("mkdir %s: %w", espMountpoint, err)
-	}
-	if err := syscall.Mount(espDev, espMountpoint, "vfat", 0, ""); err != nil {
-		return fmt.Errorf("mount ESP %s: %w", espDev, err)
-	}
-	return nil
-}
-
-func unmountESP() {
-	if err := syscall.Unmount(espMountpoint, 0); err != nil {
-		log.Printf("lifecycle: unmount %s: %v", espMountpoint, err)
-	}
-}
-
 // scheduleReboot reboots shortly after the caller returns, not before -
 // an RPC that rebooted immediately would kill the connection before its
 // own response (or, for Upgrade, its last stream message) ever reached
@@ -150,21 +131,12 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 		return nil, err
 	}
 
-	if err := mountESP(bc.espDevice); err != nil {
+	if err := espswitch.Activate(bc.espDevice, bc.targetSlot); err != nil {
+		if errors.Is(err, espswitch.ErrUKINotStaged) {
+			return nil, status.Errorf(codes.FailedPrecondition, "%v - was image/disk/activate-slot.sh ever run for this disk?", err)
+		}
 		return nil, status.Errorf(codes.Internal, "%v", err)
 	}
-	defer unmountESP()
-
-	src := filepath.Join(espMountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", bc.targetSlot))
-	staged, err := os.ReadFile(src)
-	if err != nil {
-		return nil, status.Errorf(codes.FailedPrecondition, "read staged UKI for slot %s (%s): %v - was image/disk/activate-slot.sh ever run for this disk?", bc.targetSlot, src, err)
-	}
-	dst := filepath.Join(espMountpoint, "EFI", "BOOT", "BOOTX64.EFI")
-	if err := os.WriteFile(dst, staged, 0o644); err != nil {
-		return nil, status.Errorf(codes.Internal, "write %s: %v", dst, err)
-	}
-	syscall.Sync()
 
 	scheduleReboot()
 
@@ -183,21 +155,25 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 // it, the same way LifecycleService.Rollback does for a slot switch with
 // no new content.
 //
-// wait_for_health isn't implemented: Upgrade always reboots immediately,
-// with no automatic rollback if the new slot fails to come up healthy.
-// Real automatic rollback needs a persistent "boot pending confirmation"
-// marker on STATE that survives the reboot, which the *next* boot's own
-// startup path checks and either clears (success) or - if it's still set
-// after some prior boot never got the chance to clear it, meaning that
-// boot crashed or never came up - triggers a revert back to the slot that
-// was active before this Upgrade call. None of that bookkeeping exists
-// yet, so asking for it now would silently promise something this
-// doesn't do.
+// wait_for_health, when true, writes a persistent "boot pending
+// confirmation" marker to STATE (internal/bootcommit) before switching
+// the ESP and rebooting - the *next* boot's own startup path
+// (rootfs/init's checkBootCommit) either clears it once that boot has
+// run stably for long enough (rootfs/init hooks this into
+// Supervisor.OnStable), or - if it's still set on a *subsequent* boot,
+// meaning the confirming boot crashed or never came up - reverts back
+// to the slot that was active before this Upgrade call and reboots
+// again, entirely autonomously: there is no live caller left by then to
+// stream progress back to (the original Upgrade call's connection died
+// with the first reboot), so the revert itself is never visible over
+// gRPC, only in rootfs/init's own console log and the eventual slot
+// this node comes back up on. "Healthy" here means only that
+// haproxyosd itself started and kept running for the confirmation
+// window (UpgradeRequest.health_timeout_seconds, or rootfs/init's own
+// default) - there's no HAProxy-level health check feeding into this
+// yet, see internal/bootcommit's own package doc for why that's an
+// honest limitation, not an oversight.
 func (l *Lifecycle) Upgrade(req *haproxyosv1alpha1.UpgradeRequest, stream haproxyosv1alpha1.LifecycleService_UpgradeServer) error {
-	if req.GetWaitForHealth() {
-		return status.Errorf(codes.Unimplemented, "wait_for_health isn't implemented yet - Upgrade always reboots immediately with no post-boot health check")
-	}
-
 	bundleDir := req.GetSource().GetReference()
 	if bundleDir == "" {
 		return status.Errorf(codes.InvalidArgument, "source.reference is required - a local release bundle directory (see image/release/assemble.sh); real OCI/HTTPS distribution isn't implemented yet")
@@ -263,24 +239,42 @@ func (l *Lifecycle) Upgrade(req *haproxyosv1alpha1.UpgradeRequest, stream haprox
 	}
 	syscall.Sync()
 
+	// Written before the ESP switch below, not after: once the ESP
+	// points at bc.targetSlot, that switch has to be protected by a
+	// marker already being in place, or a crash in the narrow window
+	// between the two would leave an unconfirmed slot active with
+	// nothing watching it.
+	if req.GetWaitForHealth() {
+		if err := bootcommit.Write(&bootcommit.Marker{
+			Slot:                 bc.targetSlot,
+			RevertTo:             bc.currentSlot,
+			TriesLeft:            1,
+			HealthTimeoutSeconds: int(req.GetHealthTimeoutSeconds()),
+		}); err != nil {
+			return status.Errorf(codes.Internal, "write boot-commit marker: %v", err)
+		}
+	}
+
 	if err := send("switching-slot", 0.8, fmt.Sprintf("switching ESP to slot %s", bc.targetSlot)); err != nil {
 		return err
 	}
-	if err := mountESP(bc.espDevice); err != nil {
+	if err := espswitch.Mount(bc.espDevice); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
 	writeErr := func() error {
-		stagedPath := filepath.Join(espMountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", bc.targetSlot))
+		stagedPath := filepath.Join(espswitch.Mountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", bc.targetSlot))
 		if err := os.WriteFile(stagedPath, uki, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", stagedPath, err)
 		}
-		activePath := filepath.Join(espMountpoint, "EFI", "BOOT", "BOOTX64.EFI")
+		activePath := filepath.Join(espswitch.Mountpoint, "EFI", "BOOT", "BOOTX64.EFI")
 		if err := os.WriteFile(activePath, uki, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", activePath, err)
 		}
 		return nil
 	}()
-	unmountESP()
+	if err := espswitch.Unmount(); err != nil {
+		log.Printf("lifecycle: unmount %s: %v", espswitch.Mountpoint, err)
+	}
 	if writeErr != nil {
 		return status.Errorf(codes.Internal, "%v", writeErr)
 	}

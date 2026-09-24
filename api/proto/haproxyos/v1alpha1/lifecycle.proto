@@ -17,9 +17,14 @@ service LifecycleService {
   rpc Install(InstallRequest) returns (stream InstallResponse);
 
   // Upgrade writes a new image to the currently-inactive A/B slot,
-  // switches the bootloader default, reboots, and - unless
-  // wait_for_health is false - watches the new slot's health and rolls
-  // back automatically if it doesn't report healthy in time.
+  // switches the bootloader default, and reboots. If wait_for_health is
+  // true, the *next* boot has to confirm itself healthy within
+  // health_timeout_seconds or the node reverts and reboots back to the
+  // slot that was active before this call - autonomously, driven by the
+  // node itself, not by this RPC: the stream (and the connection it
+  // rides on) ends once the first reboot happens, well before any
+  // confirmation or possible revert, so neither is ever visible as a
+  // stream message here.
   rpc Upgrade(UpgradeRequest) returns (stream UpgradeResponse);
 
   // Rollback switches the bootloader default back to the other A/B slot
@@ -54,7 +59,12 @@ message UpgradeRequest {
 }
 
 message UpgradeResponse {
-  string stage = 1; // e.g. "writing", "verifying", "switching-slot", "rebooting", "health-check", "rolled-back"
+  // e.g. "verifying", "writing-data", "writing-hash", "switching-slot",
+  // "rebooting" - the last stage this stream ever sends. Confirmation
+  // and any eventual revert happen on a later boot, outside this RPC
+  // entirely (see Upgrade's own comment above), so no stage value for
+  // either is ever streamed here.
+  string stage = 1;
   double progress = 2;
   string message = 3;
 }

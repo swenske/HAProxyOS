@@ -32,6 +32,35 @@ type Supervisor struct {
 	MinBackoff  time.Duration
 	MaxBackoff  time.Duration
 	StableAfter time.Duration // an instance that runs at least this long is "recovered" - backoff resets
+
+	// OnStable, if set, is called once an instance has been running for
+	// StableAfter - proactively, via its own timer, not just retroactively
+	// the way the backoff reset above works (that one only ever looks
+	// back at an instance's uptime *after* it has already exited). Used
+	// by rootfs/init to confirm a pending LifecycleService.Upgrade
+	// boot-commit marker (internal/bootcommit) once haproxyosd has
+	// stayed up long enough to call the boot healthy. Never called twice
+	// for the same instance, and never called at all for one that exits
+	// before StableAfter.
+	OnStable func()
+
+	// GiveUpAfter, if nonzero, bounds how long Run keeps restarting the
+	// child - measured once, from Run's own start, across every restart
+	// attempt (not reset by individual crashes, so a process crashing
+	// repeatedly still gives up on schedule rather than getting an
+	// ever-renewing budget) - before calling OnGiveUp instead of
+	// spawning again and returning. This is the *one* exception to "no
+	// give-up threshold, ever" this package otherwise holds to (see the
+	// package doc comment): used only by rootfs/init's boot-commit
+	// watchdog, to force a revert to the previous A/B slot when the
+	// current one is never going to come up healthy rather than
+	// restarting a doomed instance forever - a real, different action
+	// from "giving up" on reaching the node at all, since the reverted
+	// slot is a previously-known-good one. Zero (the default) preserves
+	// the unconditional "restart forever" behavior every other caller
+	// relies on.
+	GiveUpAfter time.Duration
+	OnGiveUp    func()
 }
 
 // Run starts Path and restarts it every time it exits, forever. Never
@@ -39,8 +68,18 @@ type Supervisor struct {
 // thing this program does.
 func (s *Supervisor) Run() {
 	backoff := s.MinBackoff
+	var giveUpDeadline time.Time
+	if s.GiveUpAfter > 0 {
+		giveUpDeadline = time.Now().Add(s.GiveUpAfter)
+	}
 	for {
 		_, backoff = s.runOnce(backoff)
+		if !giveUpDeadline.IsZero() && !time.Now().Before(giveUpDeadline) {
+			if s.OnGiveUp != nil {
+				s.OnGiveUp()
+			}
+			return
+		}
 		time.Sleep(backoff)
 	}
 }
@@ -58,6 +97,21 @@ func (s *Supervisor) runOnce(backoff time.Duration) (pid int, nextBackoff time.D
 		return -1, s.growBackoff(backoff)
 	}
 
+	// Proactively fires OnStable once this instance has survived
+	// StableAfter, independent of whether/when it eventually exits -
+	// stopped below the moment we learn it exited, so a fast crash
+	// never fires it late for an instance that's already gone.
+	stopStableTimer := make(chan struct{})
+	if s.OnStable != nil {
+		go func() {
+			select {
+			case <-time.After(s.StableAfter):
+				s.OnStable()
+			case <-stopStableTimer:
+			}
+		}()
+	}
+
 	for {
 		var ws syscall.WaitStatus
 		reaped, err := syscall.Wait4(-1, &ws, 0, nil)
@@ -68,6 +122,7 @@ func (s *Supervisor) runOnce(backoff time.Duration) (pid int, nextBackoff time.D
 		if reaped != pid {
 			continue // an orphaned grandchild, not the process we're supervising
 		}
+		close(stopStableTimer)
 
 		fmt.Printf("init: %s (pid %d) exited (%v)\n", s.Path, reaped, ws)
 		if time.Since(startedAt) >= s.StableAfter {

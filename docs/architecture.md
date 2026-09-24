@@ -587,14 +587,7 @@ plan - not implemented yet.
   build time. `req.Source.Reference` is a local bundle directory path
   for now - real OCI/HTTPS distribution isn't built yet, a separate,
   distinct concern from the actual upgrade mechanics this proves.
-  `wait_for_health` isn't implemented either (`Upgrade` always reboots
-  immediately, explicitly returning `codes.Unimplemented` if a caller
-  asks for it) - real automatic rollback-on-unhealthy-boot needs a
-  persistent "boot pending confirmation" marker on STATE that the
-  *next* boot checks and clears (or reverts from, if some earlier boot
-  crashed before ever clearing it), and none of that bookkeeping exists
-  yet; promising it now would be dishonest about what the code actually
-  does. `internal/bootslot` grew `SlotDataDevice`/`SlotHashDevice`/
+  `internal/bootslot` grew `SlotDataDevice`/`SlotHashDevice`/
   `Disk` for this - the reverse direction from `ActiveSlot` (given a
   slot, find *its* partitions, not "which slot is currently running").
   Proven with a real gRPC call, via `hack/qemu-lifecycle-upgrade-test.sh`:
@@ -626,14 +619,80 @@ plan - not implemented yet.
   kernel's own "Kernel command line:" log line back and checking it
   references the new slot's partitions and root hash, not which HTTP
   port answers.
+  `wait_for_health` is now real too: `Upgrade`, when asked, writes a
+  persistent "boot pending confirmation" marker to STATE
+  (`internal/bootcommit`) before switching the ESP and rebooting - the
+  marker records the slot awaiting confirmation, which slot to fall
+  back to, and (from `UpgradeRequest.health_timeout_seconds`) how long
+  it gets. The *next* boot's `rootfs/init` (`checkBootCommit`) either
+  gets that one confirmation attempt (decrementing the marker's
+  `tries_left` before starting `haproxyosd`, so a *subsequent* boot into
+  the same slot - if this one never confirms - finds it already
+  exhausted and reverts immediately, without giving it a third try) or,
+  finding tries already exhausted, reverts straight away without ever
+  starting `haproxyosd` at all this boot. Confirmation itself piggybacks
+  on `Supervisor`'s own stability tracking (`rootfs/init/supervisor.go`)
+  rather than inventing a separate mechanism: a new `OnStable` hook
+  fires - proactively, via its own timer, not just retroactively derived
+  from an eventual crash the way the existing backoff-reset already
+  worked - once the current `haproxyosd` instance has run for
+  `StableAfter`, and `rootfs/init` wires that hook to clear the marker.
+  Symmetrically, a new `GiveUpAfter`/`OnGiveUp` pair on `Supervisor`
+  bounds how long it keeps restarting a crash-looping `haproxyosd`
+  *only* when a marker is pending (every other boot keeps the
+  unconditional "restart forever" policy this package has always had,
+  see its own doc comment) - without this, a slot whose `haproxyosd`
+  crash-loops forever without ever causing a *kernel*-level reboot on
+  its own would just sit unreachable, since the cross-boot `tries_left`
+  check only ever gets a chance to act on a *later* boot. Both hooks
+  share one `revertAndReboot` helper, itself built on a new
+  `internal/espswitch` package factored out of `Rollback`'s own ESP-swap
+  logic once there were two real consumers of the exact same "mount the
+  ESP, copy a slot's pre-staged UKI over `BOOTX64.EFI`" mechanism - one
+  driven by a gRPC call, one triggered locally by `rootfs/init` itself.
+  None of this is visible over the original `Upgrade` call's own gRPC
+  stream: by the time a revert might happen, that connection died with
+  the first reboot, so a caller only ever sees the eventual outcome by
+  reconnecting later (`SystemService.Version`, or simply which port
+  answers), never a `"rolled-back"` stream message. What "healthy" means
+  here is deliberately limited, and documented as such in
+  `internal/bootcommit`'s own package doc: the control-plane daemon
+  started and kept running for the confirmation window, nothing more -
+  no HAProxy-level health check (its own stats socket, say) feeds into
+  this yet.
+  Proven with a real gRPC call both directions, via `hack/
+  qemu-lifecycle-upgrade-health-test.sh`: boots slot A, then calls
+  `Upgrade(wait_for_health=true)` twice against the same running node -
+  once with a "good" bundle (just the existing v1 rootfs, repackaged;
+  genuinely-new-content is what the *other* Upgrade test already
+  proves, this one is purely about the health-check/revert mechanics)
+  and once with a "broken" one, a *fresh* rootfs built with the host's
+  own dynamically-linked `/bin/false` standing in for `haproxyosd` -
+  since this rootfs ships no dynamic linker or libc at all (every real
+  binary in it is statically linked, by design), `Supervisor` doesn't
+  even get as far as a successful `exec`, hitting its spawn-failure path
+  on every single restart attempt, a realistic simulation of a badly
+  built or wrong-architecture control-plane binary landing in a release
+  bundle. The good half must show `"boot-commit confirmed"` in the
+  console log and never revert; the broken half must show the guest
+  rebooting into the broken slot, then - with **no RPC call from the
+  test driving it** - `"giving up and reverting to slot B"` and a
+  further, genuinely autonomous reboot back to whichever slot was
+  active *when the broken Upgrade was called* (B, not a hardcoded
+  fallback to the original slot A - proving the revert target is
+  dynamic). Both halves are checked via the same real-boot evidence
+  `hack/qemu-uefi-ab-boot-test.sh` established: the kernel's own "Kernel
+  command line:" log line, at specific boot numbers, referencing the
+  expected slot's partitions and root hash.
   Still open: `LifecycleService.Install` (bare-metal provisioning of a
   fresh, unpartitioned disk - needs a Go-native GPT/FAT builder, since
   `sgdisk`/`mtools`/`ukify` don't exist on the target OS any more than
   they do at runtime for `Rollback`/`Upgrade`, and unlike those two,
-  `Install` has no existing partition table to build on), `Upgrade`'s
-  `wait_for_health` + automatic rollback, and a real production signing
-  key (the test key above is exactly that - a test key) are still
-  separate, unbuilt pieces.
+  `Install` has no existing partition table to build on), a real
+  HAProxy-level health check feeding into `wait_for_health` (today it's
+  daemon-survival only, see above), and a real production signing key
+  (the test key above is exactly that - a test key) are still separate,
+  unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

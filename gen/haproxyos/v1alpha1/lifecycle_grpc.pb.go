@@ -39,9 +39,14 @@ type LifecycleServiceClient interface {
 	// fresh VM), streaming progress.
 	Install(ctx context.Context, in *InstallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallResponse], error)
 	// Upgrade writes a new image to the currently-inactive A/B slot,
-	// switches the bootloader default, reboots, and - unless
-	// wait_for_health is false - watches the new slot's health and rolls
-	// back automatically if it doesn't report healthy in time.
+	// switches the bootloader default, and reboots. If wait_for_health is
+	// true, the *next* boot has to confirm itself healthy within
+	// health_timeout_seconds or the node reverts and reboots back to the
+	// slot that was active before this call - autonomously, driven by the
+	// node itself, not by this RPC: the stream (and the connection it
+	// rides on) ends once the first reboot happens, well before any
+	// confirmation or possible revert, so neither is ever visible as a
+	// stream message here.
 	Upgrade(ctx context.Context, in *UpgradeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[UpgradeResponse], error)
 	// Rollback switches the bootloader default back to the other A/B slot
 	// and reboots, without needing a new image.
@@ -118,9 +123,14 @@ type LifecycleServiceServer interface {
 	// fresh VM), streaming progress.
 	Install(*InstallRequest, grpc.ServerStreamingServer[InstallResponse]) error
 	// Upgrade writes a new image to the currently-inactive A/B slot,
-	// switches the bootloader default, reboots, and - unless
-	// wait_for_health is false - watches the new slot's health and rolls
-	// back automatically if it doesn't report healthy in time.
+	// switches the bootloader default, and reboots. If wait_for_health is
+	// true, the *next* boot has to confirm itself healthy within
+	// health_timeout_seconds or the node reverts and reboots back to the
+	// slot that was active before this call - autonomously, driven by the
+	// node itself, not by this RPC: the stream (and the connection it
+	// rides on) ends once the first reboot happens, well before any
+	// confirmation or possible revert, so neither is ever visible as a
+	// stream message here.
 	Upgrade(*UpgradeRequest, grpc.ServerStreamingServer[UpgradeResponse]) error
 	// Rollback switches the bootloader default back to the other A/B slot
 	// and reboots, without needing a new image.

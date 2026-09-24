@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -128,6 +129,139 @@ func TestSupervisorIgnoresUnrelatedChildren(t *testing.T) {
 	}
 	if pid <= 0 {
 		t.Fatalf("expected a valid supervised pid, got %d", pid)
+	}
+}
+
+// TestSupervisorOnStableFires proves OnStable fires proactively, while
+// the process is still running - not just retroactively derived from
+// its eventual exit the way the backoff reset is - by using a process
+// that outlives StableAfter by a wide margin and checking the callback
+// already ran *before* runOnce itself returns.
+func TestSupervisorOnStableFires(t *testing.T) {
+	shPath := lookPath(t, "sh")
+
+	var fired int32
+	s := &Supervisor{
+		Path:        shPath,
+		Args:        []string{"-c", "sleep 1"},
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  20 * time.Millisecond,
+		StableAfter: 20 * time.Millisecond,
+		OnStable:    func() { atomic.AddInt32(&fired, 1) },
+	}
+
+	start := time.Now()
+	s.runOnce(s.MinBackoff)
+	elapsed := time.Since(start)
+
+	if atomic.LoadInt32(&fired) != 1 {
+		t.Fatalf("OnStable fired %d times, want exactly 1", fired)
+	}
+	if elapsed < s.StableAfter {
+		t.Fatalf("runOnce returned after %v, before StableAfter (%v) even elapsed - OnStable couldn't have fired proactively", elapsed, s.StableAfter)
+	}
+}
+
+// TestSupervisorOnStableDoesNotFireOnFastCrash proves the timer is
+// actually cancelled, not just racing the exit - a process that exits
+// well before StableAfter must never trigger OnStable at all.
+func TestSupervisorOnStableDoesNotFireOnFastCrash(t *testing.T) {
+	truePath := lookPath(t, "true")
+
+	var fired int32
+	s := &Supervisor{
+		Path:        truePath,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  20 * time.Millisecond,
+		StableAfter: time.Hour,
+		OnStable:    func() { atomic.AddInt32(&fired, 1) },
+	}
+
+	s.runOnce(s.MinBackoff)
+	// The cancellation happens synchronously (close(stopStableTimer))
+	// before runOnce returns, so there's no meaningful race to wait out
+	// here - if it were going to fire wrongly, it would need StableAfter
+	// (an hour) to do so, which this test isn't going to wait for.
+	if atomic.LoadInt32(&fired) != 0 {
+		t.Fatalf("OnStable fired %d times for a process that exited immediately, want 0", fired)
+	}
+}
+
+// TestSupervisorGiveUpAfterStopsRestarting proves Run actually returns
+// (instead of restarting forever, its behavior with GiveUpAfter unset)
+// once a crash-looping child has been retried past GiveUpAfter, and
+// that OnGiveUp fires exactly once when it does.
+func TestSupervisorGiveUpAfterStopsRestarting(t *testing.T) {
+	truePath := lookPath(t, "true") // exits immediately, every time - never stable
+
+	var fired int32
+	s := &Supervisor{
+		Path:        truePath,
+		Stdout:      os.Stdout,
+		Stderr:      os.Stderr,
+		MinBackoff:  5 * time.Millisecond,
+		MaxBackoff:  10 * time.Millisecond,
+		StableAfter: time.Hour,
+		GiveUpAfter: 50 * time.Millisecond,
+		OnGiveUp:    func() { atomic.AddInt32(&fired, 1) },
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.Run()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run never returned after GiveUpAfter elapsed on a crash-looping child")
+	}
+
+	if atomic.LoadInt32(&fired) != 1 {
+		t.Fatalf("OnGiveUp fired %d times, want exactly 1", fired)
+	}
+}
+
+// TestSupervisorGiveUpAfterUnsetNeverGivesUp proves the zero value keeps
+// today's unconditional "restart forever" behavior - Run must still be
+// looping (never returned) well past what would have been a GiveUpAfter
+// deadline in the previous test, and OnGiveUp (left nil here) must never
+// be reachable at all.
+func TestSupervisorGiveUpAfterUnsetNeverGivesUp(t *testing.T) {
+	truePath := lookPath(t, "true")
+
+	s := &Supervisor{
+		Path:   truePath,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+		// Deliberately slow backoff, not the fast one other tests use -
+		// this Run() call is left running past this test's own return
+		// (Supervisor.Run has no cancellation mechanism, consistent
+		// with its "runs forever" contract), so a slow backoff keeps it
+		// from spawning /usr/bin/true in a tight loop for the rest of
+		// this test binary's process lifetime.
+		MinBackoff:  200 * time.Millisecond,
+		MaxBackoff:  200 * time.Millisecond,
+		StableAfter: time.Hour,
+		// GiveUpAfter intentionally left zero.
+	}
+
+	done := make(chan struct{})
+	go func() {
+		s.Run()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("Run returned with GiveUpAfter unset - it must restart forever")
+	case <-time.After(100 * time.Millisecond):
+		// Still running, as expected.
 	}
 }
 

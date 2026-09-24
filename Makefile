@@ -16,7 +16,7 @@ GEN_DIR := gen
 	qemu-verity-boot-test state-image qemu-state-persist-test \
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
-	qemu-lifecycle-upgrade-test
+	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test
 
 all: build
 
@@ -254,6 +254,18 @@ qemu-secureboot-test: kernel-build rootfs-build
 # hack/qemu-lifecycle-upgrade-test.sh.
 qemu-lifecycle-upgrade-test: build disk-image
 	./hack/qemu-lifecycle-upgrade-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
+
+# Phase 3 cont'd: proves LifecycleService.Upgrade's wait_for_health -
+# a healthy new slot confirms (Supervisor.OnStable -> internal/
+# bootcommit's marker cleared) and stays; an unhealthy one (haproxyosd
+# built dynamically-linked into a rootfs with no libc/dynamic linker at
+# all, so it can never even exec - see hack/
+# qemu-lifecycle-upgrade-health-test.sh's own comment) reverts and
+# reboots back automatically (Supervisor.GiveUpAfter/OnGiveUp), with no
+# RPC call driving the revert itself. Requires haproxyosctl built (see
+# `build`).
+qemu-lifecycle-upgrade-health-test: build disk-image
+	./hack/qemu-lifecycle-upgrade-health-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`
