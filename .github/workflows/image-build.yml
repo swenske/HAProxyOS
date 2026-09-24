@@ -60,6 +60,33 @@ jobs:
       - name: HAProxy network boot test (Phase 2)
         run: make qemu-network-test
 
+      # Phase 4: kernel/CIS hardening pass - most of what a CIS
+      # benchmark's kernel-adjacent controls call out (loadable-module
+      # restrictions, /dev/mem, kexec, hibernation, USB/Firewire/
+      # staging drivers) was already true by construction from
+      # allnoconfig; kernel/configs/haproxyos_defconfig's own new
+      # KSPP-style self-protection block (STACKPROTECTOR_STRONG,
+      # SLAB_FREELIST_RANDOM/_HARDENED, HARDENED_USERCOPY,
+      # FORTIFY_SOURCE, INIT_ON_ALLOC/_FREE_DEFAULT_ON, CONFIG_SECURITY
+      # + SECURITY_YAMA, SYN_COOKIES) is what was left. This step proves
+      # the *runtime* half - rootfs/init/main.go's hardenSysctls, which
+      # writes tunable values with no Kconfig home straight to
+      # /proc/sys at boot, since there's no sysctl(8)/procps on this
+      # rootfs at all - actually applies every sysctl it claims to on a
+      # real boot, not just that the Go code runs without panicking: a
+      # real gap was caught writing this (not assumed away) -
+      # net.ipv4.tcp_syncookies doesn't exist as a /proc/sys node at
+      # all without CONFIG_SYN_COOKIES, and a real boot's console log
+      # showed exactly that one write failing ("no such file or
+      # directory") while every other sysctl, and the boot itself,
+      # looked completely fine either way, since a failed sysctl write
+      # here is logged but non-fatal by design. hack/
+      # qemu-hardening-test.sh checks each expected console line
+      # individually against a hardcoded list, and separately fails on
+      # any sysctl write that logged an error at all, expected or not.
+      - name: Kernel hardening sysctls take effect on a real boot (Phase 4)
+        run: make qemu-hardening-test
+
       # Host-level check of the gRPC API surface itself (ApplyConfig/
       # ShowInfo/...) - faster than going through QEMU for this, and
       # exercises paths (ApplyConfig's seamless reload) the network boot

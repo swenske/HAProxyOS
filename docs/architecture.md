@@ -793,7 +793,66 @@ plan - not implemented yet.
   for real locally before ever touching CI: both UKIs signed with the
   actual production key and `sbverify`-confirmed valid, using the exact
   same command the workflow step now runs.
-- **Phase 4**: SELinux policy + full CIS hardening pass.
+- **Phase 4** (started): kernel/CIS hardening pass is real, SELinux
+  policy is still open. Most of what a CIS benchmark's kernel-adjacent
+  controls call out (loadable-module restrictions, `/dev/mem`, kexec,
+  hibernation, USB/Firewire/staging drivers) was already true by
+  construction from `allnoconfig` - this pass is specifically what was
+  left: `kernel/configs/haproxyos_defconfig` grew a KSPP-style
+  self-protection block (`STACKPROTECTOR_STRONG`, `SLAB_FREELIST_
+  RANDOM`/`_HARDENED`, `HARDENED_USERCOPY`, `FORTIFY_SOURCE`,
+  `INIT_ON_ALLOC`/`_FREE_DEFAULT_ON`, `CONFIG_SECURITY` + `SECURITY_
+  YAMA`) verified, the same way every other Kconfig addition in this
+  project has been, by diffing the *full* resolved config after merging
+  - not just trusting a clean `merge_config.sh` run - to confirm
+  `CONFIG_SECURITY=y` (the master gate every LSM needs, previously
+  unset entirely) didn't silently pull in some *other* LSM along with
+  Yama; the only side effects were an inert `CONFIG_INTEGRITY=y`
+  framework dependency and a cosmetic `CONFIG_LSM=` default-ordering
+  string naming LSMs that aren't actually compiled in. `INIT_ON_FREE`'s
+  real, non-trivial perf cost (memory-zeroing on every kernel-side
+  free, more noticeable than `INIT_ON_ALLOC`'s under allocation-heavy
+  workloads) is accepted for now rather than pre-emptively tuned away,
+  documented as the first thing to reconsider if a future real-traffic
+  benchmark shows this project's network fast path regressing.
+  `rootfs/init/main.go`'s new `hardenSysctls` is the runtime half - the
+  tunable *values* (not features to compile in or out) that have no
+  Kconfig home and need writing to `/proc/sys` at boot instead, since
+  there's no `sysctl(8)`/procps on this rootfs at all: `kernel.
+  dmesg_restrict`/`kptr_restrict` (hide the ring buffer and kernel
+  pointers from anything without the matching capability - the
+  unprivileged `haproxy` worker, uid 1000/chroot, specifically),
+  `kernel.yama.ptrace_scope=2` (only `CAP_SYS_PTRACE` can attach -
+  `haproxyosd`, root, still can; the worker no longer can, at all),
+  and a set of anti-spoofing/anti-redirect/SYN-flood network sysctls
+  chosen for what they mean to a reverse proxy specifically (`tcp_
+  syncookies` isn't a generic checklist item on a box whose entire
+  purpose is accepting inbound internet connections). A real gap was
+  caught writing this, not assumed away: `net.ipv4.tcp_syncookies`
+  doesn't exist as a `/proc/sys` node at all without `CONFIG_SYN_
+  COOKIES`, which nothing else in the defconfig had pulled in - a real
+  boot's console log showed exactly that one write failing ("no such
+  file or directory") while every other sysctl, and the boot itself,
+  looked completely fine either way, since a failed write here is
+  logged but non-fatal by design (same tolerant pattern `mount()`
+  already used for a missing STATE drive) - fixed by adding the one
+  missing Kconfig symbol, not by working around the gap in Go.
+  `hack/qemu-hardening-test.sh` exists specifically to keep re-catching
+  this class of bug: it boots for real and checks every expected
+  `"init: sysctl ..."` console line individually, *and* separately
+  fails on any sysctl write that logged an error at all, expected or
+  not - a passing HTTP check and a clean-looking boot log both proved
+  insufficient on their own to catch the real `tcp_syncookies` gap.
+  Still open: SELinux policy - a much larger, more specialized
+  undertaking (writing type-enforcement rules for a from-scratch OS
+  with no existing distro policy to build on), and one whose marginal
+  value here is genuinely smaller than usual, given how much of what
+  SELinux typically defends against (arbitrary shell/code execution,
+  package tampering) this project's architecture already eliminates
+  structurally (no shell, no package manager, dm-verity-verified
+  read-only root) - deferred, not because it's uninteresting, but
+  because the kernel/CIS pass above was the clearer, more tractable
+  starting point.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
   (separate container from the runner) + remote kernel-menuconfig UI -

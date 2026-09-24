@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"syscall"
 	"time"
 
@@ -234,10 +235,91 @@ func bindMount(src, dst string) {
 	}
 }
 
+// hardenSysctls applies the runtime half of Phase 4's kernel hardening
+// pass - the half that can't be baked into kernel/configs/
+// haproxyos_defconfig at build time (a tunable *value*, not a feature
+// being compiled in or out at all) and has to be written to /proc/sys
+// at boot instead, since there's no sysctl(8)/procps binary, and no
+// /etc/sysctl.d for one to read anyway, on this rootfs. Runs right
+// after mount("proc", ...) - nothing else here needs anything more than
+// that.
+//
+// Each entry is independent and non-fatal on its own: a kernel built
+// without some feature (CONFIG_SECURITY_YAMA, say) simply won't have
+// the matching /proc/sys node at all, and that one write logs and moves
+// on rather than aborting the boot - the same tolerant pattern mount()
+// itself already uses for a missing STATE drive. Logged either way
+// (success or failure) specifically so a real boot's console output is
+// enough to verify every value actually took effect, not just that
+// this function ran without panicking.
+func hardenSysctls() {
+	sysctls := map[string]string{
+		// Kernel self-protection: hide the ring buffer and kernel
+		// pointers from anything without CAP_SYSLOG/CAP_SYSLOG-adjacent
+		// privilege - defense in depth against a compromised haproxyosd
+		// or haproxy (uid 1000, no such capability) trying to defeat
+		// KASLR via an info leak.
+		"/proc/sys/kernel/dmesg_restrict": "1",
+		"/proc/sys/kernel/kptr_restrict":  "2",
+		// Yama (kernel/configs/haproxyos_defconfig's own CONFIG_SECURITY_YAMA):
+		// 2 ("admin-only") means only a process with CAP_SYS_PTRACE can
+		// ptrace another - haproxyosd (root) still can, but the
+		// unprivileged haproxy worker (chroot + uid 1000, no such
+		// capability) can no longer ptrace anything at all, including
+		// itself/siblings.
+		"/proc/sys/kernel/yama/ptrace_scope": "2",
+		// Anti-spoofing / anti-redirect network hardening - meaningful
+		// for a network-facing reverse proxy specifically, not just a
+		// generic checklist item: reject packets whose reverse path
+		// doesn't match the interface they arrived on, never honor ICMP
+		// redirects (a classic MITM vector) or source-routed packets,
+		// and never originate ICMP redirects either.
+		"/proc/sys/net/ipv4/conf/all/rp_filter":                "1",
+		"/proc/sys/net/ipv4/conf/default/rp_filter":            "1",
+		"/proc/sys/net/ipv4/conf/all/accept_redirects":         "0",
+		"/proc/sys/net/ipv4/conf/default/accept_redirects":     "0",
+		"/proc/sys/net/ipv4/conf/all/send_redirects":           "0",
+		"/proc/sys/net/ipv4/conf/default/send_redirects":       "0",
+		"/proc/sys/net/ipv4/conf/all/accept_source_route":      "0",
+		"/proc/sys/net/ipv4/conf/default/accept_source_route":  "0",
+		"/proc/sys/net/ipv4/icmp_echo_ignore_broadcasts":       "1",
+		"/proc/sys/net/ipv4/icmp_ignore_bogus_error_responses": "1",
+		// SYN flood protection - not a generic checklist item here
+		// either: this node's entire purpose is accepting inbound
+		// connections from the internet as a reverse proxy/load
+		// balancer, exactly the exposure tcp_syncookies protects.
+		"/proc/sys/net/ipv4/tcp_syncookies": "1",
+		// VFS-level protections against following an attacker-created
+		// hardlink/symlink in a world-writable sticky directory - no
+		// such directory actually exists on this rootfs today, but this
+		// is cheap, harmless, and forward-looking (STATE, /tmp).
+		"/proc/sys/fs/protected_hardlinks": "1",
+		"/proc/sys/fs/protected_symlinks":  "1",
+	}
+
+	// Sorted, not map iteration order, so console output (and this
+	// function's own tests) are deterministic.
+	paths := make([]string, 0, len(sysctls))
+	for p := range sysctls {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+
+	for _, path := range paths {
+		value := sysctls[path]
+		if err := os.WriteFile(path, []byte(value), 0o644); err != nil {
+			fmt.Printf("init: sysctl %s=%s: %v\n", path, value, err)
+			continue
+		}
+		fmt.Printf("init: sysctl %s=%s\n", path, value)
+	}
+}
+
 func main() {
 	mount("proc", "/proc", "proc")
 	mount("sysfs", "/sys", "sysfs")
 	mount("devtmpfs", "/dev", "devtmpfs")
+	hardenSysctls()
 	mountEphemeral()
 	mountState()
 	pendingMarker := checkBootCommit()

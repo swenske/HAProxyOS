@@ -78,12 +78,59 @@
 #   # ("codepage cp437 not found") without them.
 #   CONFIG_VFAT_FS=y CONFIG_NLS_CODEPAGE_437=y CONFIG_NLS_ISO8859_1=y
 #
+#   # Phase 4: kernel self-protection hardening (KSPP-style; a real CIS
+#   # benchmark's own kernel-adjacent controls, not just userspace ones -
+#   # sysctl-level hardening, applied at boot by rootfs/init since there's
+#   # no sysctl(8)/procps on the target, is a separate, later piece). Most
+#   # of what CIS/KSPP call out (loadable-module restrictions, /dev/mem,
+#   # kexec, hibernation, USB/Firewire/staging drivers) was already true
+#   # by construction from allnoconfig - this block is what's left:
+#   CONFIG_STACKPROTECTOR=y CONFIG_STACKPROTECTOR_STRONG=y
+#   CONFIG_SLAB_FREELIST_RANDOM=y CONFIG_SLAB_FREELIST_HARDENED=y
+#   CONFIG_HARDENED_USERCOPY=y CONFIG_FORTIFY_SOURCE=y
+#   CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y CONFIG_INIT_ON_FREE_DEFAULT_ON=y
+#   # INIT_ON_FREE zeroes freed kernel memory (defense against use-after-
+#   # free/info-leak bugs) at a real, non-trivial cost - more noticeable
+#   # than INIT_ON_ALLOC's under allocation-heavy kernel-side workloads
+#   # (e.g. high connection/packet churn). Worth remembering as the first
+#   # thing to reconsider if a future real-traffic benchmark shows this
+#   # project's network fast path regressing - not disabled preemptively
+#   # here, since no such benchmark exists yet to say it actually matters
+#   # for HAProxy's own (mostly userspace-pool-allocated) hot path.
+#   #
+#   # CONFIG_SECURITY is the master gate every LSM (SELinux, Yama, ...)
+#   # needs - unset until now, so nothing gated behind it (not just Yama)
+#   # could ever have been enabled at all, even by accident. Only Yama
+#   # (ptrace_scope restriction - relevant here since haproxyosd runs as
+#   # root and a compromised instance could otherwise ptrace anything)
+#   # is turned on; verified via a real `diff` of the fully-resolved
+#   # config, not just a clean merge, that enabling the master gate
+#   # didn't silently pull in some *other* LSM along with it - the only
+#   # side effects were CONFIG_INTEGRITY=y (an inert framework dependency
+#   # with no IMA/EVM policy active, since neither is enabled) and a
+#   # cosmetic CONFIG_LSM= default-ordering string listing LSMs that
+#   # aren't actually compiled in at all. Yama's own restriction *level*
+#   # (kernel.yama.ptrace_scope) isn't a Kconfig knob - rootfs/init sets
+#   # it at boot alongside the rest of Phase 4's sysctl hardening.
+#   #
+#   # CONFIG_STRICT_MODULE_RWX was considered and dropped: it depends on
+#   # CONFIG_MODULES, which is - and stays - unset (no loadable module
+#   # support compiled in at all is a strictly stronger guarantee than
+#   # merely protecting loaded modules' memory permissions would be).
+#   CONFIG_SECURITY=y CONFIG_SECURITY_YAMA=y
+#   # rootfs/init/main.go's hardenSysctls also sets net.ipv4.tcp_syncookies
+#   # (SYN flood protection - directly relevant for a reverse proxy/load
+#   # balancer's own exposure) - but that /proc/sys node doesn't exist at
+#   # all without CONFIG_SYN_COOKIES, caught by a real boot logging "no
+#   # such file or directory" for exactly that one write and nothing
+#   # else, not assumed from CONFIG_INET/CONFIG_NET already being on.
+#   CONFIG_SYN_COOKIES=y
+#
 # Deliberately the FULL resolved config (every symbol explicit), not a
 # compact savedefconfig diff: a diff format resolves unlisted symbols
 # against the kernel's own defconfig-derived defaults, which would
 # silently re-enable drivers allnoconfig turned off. See
-# ../../docs/architecture.md for what's still not in here (Secure Boot
-# signing, SELinux, hardening).
+# ../../docs/architecture.md for what's still not in here (SELinux).
 #
 # Automatically generated file; DO NOT EDIT (by hand - it's fine to
 # regenerate it via the workflow above).
@@ -659,7 +706,8 @@ CONFIG_HAVE_ARCH_SECCOMP_FILTER=y
 # CONFIG_SECCOMP is not set
 CONFIG_HAVE_ARCH_KSTACK_ERASE=y
 CONFIG_HAVE_STACKPROTECTOR=y
-# CONFIG_STACKPROTECTOR is not set
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
 CONFIG_ARCH_SUPPORTS_LTO_CLANG=y
 CONFIG_ARCH_SUPPORTS_LTO_CLANG_THIN=y
 CONFIG_LTO_NONE=y
@@ -807,8 +855,8 @@ CONFIG_COREDUMP=y
 #
 CONFIG_SLUB=y
 # CONFIG_SLAB_MERGE_DEFAULT is not set
-# CONFIG_SLAB_FREELIST_RANDOM is not set
-# CONFIG_SLAB_FREELIST_HARDENED is not set
+CONFIG_SLAB_FREELIST_RANDOM=y
+CONFIG_SLAB_FREELIST_HARDENED=y
 # CONFIG_SLAB_BUCKETS is not set
 # CONFIG_SLUB_STATS is not set
 # CONFIG_RANDOM_KMALLOC_CACHES is not set
@@ -901,7 +949,7 @@ CONFIG_IP_PNP_DHCP=y
 # CONFIG_NET_IPIP is not set
 # CONFIG_NET_IPGRE_DEMUX is not set
 CONFIG_NET_IP_TUNNEL=y
-# CONFIG_SYN_COOKIES is not set
+CONFIG_SYN_COOKIES=y
 # CONFIG_NET_IPVTI is not set
 # CONFIG_NET_FOU is not set
 # CONFIG_NET_FOU_IP_TUNNELS is not set
@@ -938,6 +986,7 @@ CONFIG_IPV6_NDISC_NODETYPE=y
 # CONFIG_IPV6_SEG6_HMAC is not set
 # CONFIG_IPV6_RPL_LWTUNNEL is not set
 # CONFIG_IPV6_IOAM6_LWTUNNEL is not set
+# CONFIG_NETLABEL is not set
 # CONFIG_MPTCP is not set
 # CONFIG_NETWORK_SECMARK is not set
 CONFIG_NET_PTP_CLASSIFY=y
@@ -2251,11 +2300,26 @@ CONFIG_PROC_MEM_ALWAYS_FORCE=y
 # CONFIG_PROC_MEM_FORCE_PTRACE is not set
 # CONFIG_PROC_MEM_NO_FORCE is not set
 # CONFIG_MSEAL_SYSTEM_MAPPINGS is not set
-# CONFIG_SECURITY is not set
+CONFIG_SECURITY=y
 # CONFIG_SECURITYFS is not set
+# CONFIG_SECURITY_NETWORK is not set
+# CONFIG_SECURITY_PATH is not set
 # CONFIG_STATIC_USERMODEHELPER is not set
+# CONFIG_SECURITY_SMACK is not set
+# CONFIG_SECURITY_TOMOYO is not set
+# CONFIG_SECURITY_APPARMOR is not set
+# CONFIG_SECURITY_LOADPIN is not set
+CONFIG_SECURITY_YAMA=y
+# CONFIG_SECURITY_SAFESETID is not set
+# CONFIG_SECURITY_LOCKDOWN_LSM is not set
+# CONFIG_SECURITY_LANDLOCK is not set
+CONFIG_INTEGRITY=y
+# CONFIG_INTEGRITY_SIGNATURE is not set
+# CONFIG_IMA is not set
 # CONFIG_IMA_SECURE_AND_OR_TRUSTED_BOOT is not set
+# CONFIG_EVM is not set
 CONFIG_DEFAULT_SECURITY_DAC=y
+CONFIG_LSM="landlock,lockdown,yama,loadpin,safesetid,ipe,bpf"
 
 #
 # Kernel hardening options
@@ -2270,8 +2334,8 @@ CONFIG_CC_HAS_AUTO_VAR_INIT_ZERO=y
 # CONFIG_INIT_STACK_NONE is not set
 # CONFIG_INIT_STACK_ALL_PATTERN is not set
 CONFIG_INIT_STACK_ALL_ZERO=y
-# CONFIG_INIT_ON_ALLOC_DEFAULT_ON is not set
-# CONFIG_INIT_ON_FREE_DEFAULT_ON is not set
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+CONFIG_INIT_ON_FREE_DEFAULT_ON=y
 CONFIG_CC_HAS_ZERO_CALL_USED_REGS=y
 # CONFIG_ZERO_CALL_USED_REGS is not set
 # end of Memory initialization
@@ -2279,8 +2343,9 @@ CONFIG_CC_HAS_ZERO_CALL_USED_REGS=y
 #
 # Bounds checking
 #
-# CONFIG_FORTIFY_SOURCE is not set
-# CONFIG_HARDENED_USERCOPY is not set
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_HARDENED_USERCOPY_DEFAULT_ON=y
 # end of Bounds checking
 
 #
@@ -2706,6 +2771,7 @@ CONFIG_TRACING_SUPPORT=y
 CONFIG_HAVE_SAMPLE_FTRACE_DIRECT=y
 CONFIG_HAVE_SAMPLE_FTRACE_DIRECT_MULTI=y
 CONFIG_ARCH_HAS_DEVMEM_IS_ALLOWED=y
+# CONFIG_STRICT_DEVMEM is not set
 
 #
 # x86 Debugging

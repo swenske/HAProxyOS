@@ -17,7 +17,7 @@ GEN_DIR := gen
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
-	lifecycle-install-test
+	lifecycle-install-test qemu-hardening-test
 
 all: build
 
@@ -125,6 +125,17 @@ initramfs-full: init daemon-static haproxy-build
 # (see hack/qemu-network-test.sh). Requires qemu-system-x86_64 on PATH.
 qemu-network-test: kernel-build initramfs-full
 	./hack/qemu-network-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs-full.cpio.gz
+
+# Phase 4: proves rootfs/init/main.go's hardenSysctls actually applies
+# every kernel-hardening sysctl it claims to on a real boot (not just
+# that the Go code runs without panicking, and not just that the
+# matching kernel/configs/haproxyos_defconfig options compile in - see
+# hack/qemu-hardening-test.sh's own comment for the real gap that
+# distinction caught: CONFIG_SYN_COOKIES missing, silently failing only
+# the tcp_syncookies write while every other sysctl and the boot itself
+# looked completely fine).
+qemu-hardening-test: kernel-build initramfs-full
+	./hack/qemu-hardening-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs-full.cpio.gz
 
 # Phase 3: builds a squashfs image of the real rootfs (init + haproxyosd +
 # haproxy + bootstrap config, same content as initramfs-full but as a
