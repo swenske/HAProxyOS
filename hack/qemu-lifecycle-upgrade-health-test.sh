@@ -116,14 +116,16 @@ GOOD_BUNDLE="$WORKDIR/bundle-good"
 BROKEN_ROOTFS="$WORKDIR/rootfs-broken"
 mkdir -p "$BROKEN_ROOTFS"
 "$SELF_DIR/../rootfs/assemble.sh" "$BROKEN_ROOTFS" "$BUILD_DIR/init" /bin/false \
-  "$BUILD_DIR/haproxy" "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg"
+  "$BUILD_DIR/haproxy" "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg" \
+  "$BUILD_DIR/selinux/hapos.policy"
 BROKEN_BUNDLE="$WORKDIR/bundle-broken"
 "$SELF_DIR/../image/release/assemble.sh" "$BROKEN_BUNDLE" "$KERNEL" "$BROKEN_ROOTFS"
 
 HAPROXY_BROKEN_ROOTFS="$WORKDIR/rootfs-haproxy-broken"
 mkdir -p "$HAPROXY_BROKEN_ROOTFS"
 "$SELF_DIR/../rootfs/assemble.sh" "$HAPROXY_BROKEN_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/haproxyosd" \
-  /bin/false "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg"
+  /bin/false "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg" \
+  "$BUILD_DIR/selinux/hapos.policy"
 HAPROXY_BROKEN_BUNDLE="$WORKDIR/bundle-haproxy-broken"
 "$SELF_DIR/../image/release/assemble.sh" "$HAPROXY_BROKEN_BUNDLE" "$KERNEL" "$HAPROXY_BROKEN_ROOTFS"
 

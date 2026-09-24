@@ -126,7 +126,7 @@ EOF
 V2_ROOTFS="$WORKDIR/rootfs-v2"
 mkdir -p "$V2_ROOTFS"
 "$SELF_DIR/../rootfs/assemble.sh" "$V2_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/haproxyosd" \
-  "$BUILD_DIR/haproxy" "$WORKDIR/haproxy-v2.cfg"
+  "$BUILD_DIR/haproxy" "$WORKDIR/haproxy-v2.cfg" "$BUILD_DIR/selinux/hapos.policy"
 
 V2_BUNDLE="$WORKDIR/bundle-v2"
 "$SELF_DIR/../image/release/assemble.sh" "$V2_BUNDLE" "$KERNEL" "$V2_ROOTFS"
