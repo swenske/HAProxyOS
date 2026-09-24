@@ -157,22 +157,23 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 //
 // wait_for_health, when true, writes a persistent "boot pending
 // confirmation" marker to STATE (internal/bootcommit) before switching
-// the ESP and rebooting - the *next* boot's own startup path
-// (rootfs/init's checkBootCommit) either clears it once that boot has
-// run stably for long enough (rootfs/init hooks this into
-// Supervisor.OnStable), or - if it's still set on a *subsequent* boot,
-// meaning the confirming boot crashed or never came up - reverts back
-// to the slot that was active before this Upgrade call and reboots
-// again, entirely autonomously: there is no live caller left by then to
-// stream progress back to (the original Upgrade call's connection died
-// with the first reboot), so the revert itself is never visible over
-// gRPC, only in rootfs/init's own console log and the eventual slot
-// this node comes back up on. "Healthy" here means only that
-// haproxyosd itself started and kept running for the confirmation
-// window (UpgradeRequest.health_timeout_seconds, or rootfs/init's own
-// default) - there's no HAProxy-level health check feeding into this
-// yet, see internal/bootcommit's own package doc for why that's an
-// honest limitation, not an oversight.
+// the ESP and rebooting - the *next* boot's own cmd/haproxyosd checks
+// it at startup and, in the background, polls HAProxy's own stats
+// socket (internal/haproxy.Manager.ShowInfo) until it succeeds
+// repeatedly in a row, confirming the marker (internal/
+// bootcommit.Confirm) - real, application-level health, not just "the
+// daemon process is still running". If that never happens within
+// UpgradeRequest.health_timeout_seconds, it reverts back to the slot
+// that was active before this Upgrade call and reboots
+// (internal/bootrevert.To), autonomously: there is no live caller left
+// by then to stream progress back to (the original Upgrade call's
+// connection died with the first reboot), so neither the confirmation
+// nor a possible revert is ever visible over gRPC, only in the node's
+// own logs and the eventual slot it comes back up on. A second,
+// independent safety net (rootfs/init's Supervisor.GiveUpAfter) covers
+// the one failure mode cmd/haproxyosd's own check can't: haproxyosd
+// crashing too fast, or too often, to ever get a chance to run that
+// check at all.
 func (l *Lifecycle) Upgrade(req *haproxyosv1alpha1.UpgradeRequest, stream haproxyosv1alpha1.LifecycleService_UpgradeServer) error {
 	bundleDir := req.GetSource().GetReference()
 	if bundleDir == "" {

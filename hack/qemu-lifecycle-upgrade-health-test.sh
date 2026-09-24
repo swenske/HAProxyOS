@@ -37,21 +37,46 @@
 #          landing in a release bundle, and it exercises exactly the
 #          spawn-failure path of Supervisor.runOnce, not just the
 #          child-exits-immediately one.
+#        - "haproxy-broken": a *third* fresh rootfs with the real,
+#          working init and haproxyosd, but /bin/false standing in for
+#          *haproxy* itself this time (rootfs/assemble.sh's
+#          <haproxy-bin> argument, not <haproxyosd-bin>) - haproxyosd
+#          starts up perfectly fine (it's the real binary), calls
+#          internal/haproxy.Manager.Reload(), which fails and is logged
+#          but not fatal (matching cmd/haproxyosd/main.go's existing
+#          "continue without it" behavior for a missing/broken haproxy),
+#          and HAProxy's stats socket simply never comes into existence
+#          - so every ShowInfo() call inside
+#          cmd/haproxyosd's own confirmBootHealth goroutine fails
+#          forever. This is what actually exercises the real,
+#          HAProxy-level health check this test is named for - the
+#          *other* "broken" bundle above only ever exercises rootfs/
+#          init's own Supervisor-level backstop (haproxyosd itself never
+#          running at all), a different, complementary failure mode.
 #   3. calls `haproxyosctl lifecycle upgrade -wait-for-health
 #      -health-timeout 5` with the "good" bundle - the guest reboots
 #      into slot B for real, and after health-timeout-plus-a-margin, the
-#      console must show "boot-commit confirmed" and the kernel cmdline
-#      must still show slot B's partitions/root hash - no revert.
-#   4. calls the same RPC again with the "broken" bundle, targeting
-#      whichever slot is inactive at that point (A, since step 3 left B
-#      active) - the guest reboots into slot A, haproxyosd (really
-#      /bin/false) crash-loops immediately, and - entirely on its own,
-#      no RPC involved - Supervisor's GiveUpAfter elapses and the node
-#      reverts and reboots a *second* time, this time back to slot B
-#      (RevertTo was recorded as whatever was active *when the broken
-#      Upgrade was called*, i.e. B - not hardcoded back to the original
-#      slot A) - proving the revert target is dynamic, not a fixed
-#      fallback. HTTP must come back up on its own afterward.
+#      console must show "bootcommit: confirmed healthy" and the kernel
+#      cmdline must still show slot B's partitions/root hash - no revert.
+#   4. calls the same RPC again with the "broken" (daemon-broken)
+#      bundle, targeting whichever slot is inactive at that point (A,
+#      since step 3 left B active) - the guest reboots into slot A,
+#      haproxyosd (really /bin/false) crash-loops immediately, and -
+#      entirely on its own, no RPC involved - Supervisor's GiveUpAfter
+#      elapses and the node reverts and reboots a *second* time, this
+#      time back to slot B (RevertTo was recorded as whatever was active
+#      *when the broken Upgrade was called*, i.e. B - not hardcoded back
+#      to the original slot A) - proving the revert target is dynamic,
+#      not a fixed fallback. HTTP must come back up on its own
+#      afterward.
+#   5. calls the same RPC a third time with the "haproxy-broken" bundle,
+#      targeting whichever slot is inactive at that point (A again,
+#      since step 4 left B active) - the guest reboots into slot A for
+#      real (proving *this* rootfs, unlike the daemon-broken one, boots
+#      and runs haproxyosd just fine), and - again with no RPC involved,
+#      this time via cmd/haproxyosd's own confirmBootHealth rather than
+#      rootfs/init's GiveUpAfter - reverts and reboots a second time,
+#      back to slot B once more.
 #
 # Usage: hack/qemu-lifecycle-upgrade-health-test.sh <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>
 # Same inputs as hack/qemu-lifecycle-upgrade-test.sh.
@@ -95,14 +120,22 @@ mkdir -p "$BROKEN_ROOTFS"
 BROKEN_BUNDLE="$WORKDIR/bundle-broken"
 "$SELF_DIR/../image/release/assemble.sh" "$BROKEN_BUNDLE" "$KERNEL" "$BROKEN_ROOTFS"
 
-# --- inject both bundles into disk.img's STATE partition, before the
-# first boot (see this script's own header comment for why) ---
+HAPROXY_BROKEN_ROOTFS="$WORKDIR/rootfs-haproxy-broken"
+mkdir -p "$HAPROXY_BROKEN_ROOTFS"
+"$SELF_DIR/../rootfs/assemble.sh" "$HAPROXY_BROKEN_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/haproxyosd" \
+  /bin/false "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg"
+HAPROXY_BROKEN_BUNDLE="$WORKDIR/bundle-haproxy-broken"
+"$SELF_DIR/../image/release/assemble.sh" "$HAPROXY_BROKEN_BUNDLE" "$KERNEL" "$HAPROXY_BROKEN_ROOTFS"
+
+# --- inject all three bundles into disk.img's STATE partition, before
+# the first boot (see this script's own header comment for why) ---
 STATE_START_SECTOR="$(sgdisk -i 6 "$DISK" | awk -F': ' '/^First sector/ {print $2}' | awk '{print $1}')"
 STATE_SIZE_SECTORS="$(sgdisk -i 6 "$DISK" | awk -F': ' '/^Partition size/ {print $2}' | awk '{print $1}')"
 STATE_IMG="$WORKDIR/state.img"
 dd if="$DISK" of="$STATE_IMG" bs=512 skip="$STATE_START_SECTOR" count="$STATE_SIZE_SECTORS" status=none
-for name in good broken; do
+for name in good broken haproxy-broken; do
   bundle_var="${name^^}_BUNDLE"
+  bundle_var="${bundle_var//-/_}"
   bundle_dir="${!bundle_var}"
   debugfs -w -R "mkdir upgrade-$name" "$STATE_IMG" >/dev/null 2>&1
   for f in rootfs.squashfs rootfs.verity uki-a.efi uki-b.efi; do
@@ -110,7 +143,7 @@ for name in good broken; do
   done
 done
 dd if="$STATE_IMG" of="$DISK" bs=512 seek="$STATE_START_SECTOR" conv=notrunc status=none
-echo "Injected both release bundles into disk.img's STATE partition"
+echo "Injected all three release bundles into disk.img's STATE partition"
 
 # --- boot slot A for real ---
 boot_disk() {
@@ -243,9 +276,14 @@ assert_boot_n "$LOG" 2 /dev/vda4 /dev/vda5 "$GOOD_HASH" "post-'good'-upgrade boo
 echo "Slot B (good) OK: real gRPC Upgrade with wait_for_health installed it and it's live"
 
 # Wait comfortably past HEALTH_TIMEOUT_SECS and confirm it actually got
-# confirmed - not just "hasn't reverted yet, but might still".
-if ! wait_log "$LOG" "boot-commit confirmed" $((HEALTH_TIMEOUT_SECS + 30)); then
-  echo "Upgrade health test FAILED: 'boot-commit confirmed' never appeared within $((HEALTH_TIMEOUT_SECS + 30))s of the 'good' upgrade's reboot" >&2
+# confirmed - not just "hasn't reverted yet, but might still" - via
+# cmd/haproxyosd's own real HAProxy-level check (internal/
+# bootcommit.Confirm), not rootfs/init inferring health from mere
+# process survival (that inference doesn't exist any more - see
+# rootfs/init/main.go's own comment on why it was removed once this
+# real check landed).
+if ! wait_log "$LOG" "bootcommit: confirmed healthy" $((HEALTH_TIMEOUT_SECS + 30)); then
+  echo "Upgrade health test FAILED: 'bootcommit: confirmed healthy' never appeared within $((HEALTH_TIMEOUT_SECS + 30))s of the 'good' upgrade's reboot" >&2
   echo "--- console output ---" >&2; cat "$LOG" >&2
   exit 1
 fi
@@ -299,4 +337,56 @@ if ! grep -q "giving up and reverting to slot B" "$LOG"; then
 fi
 assert_boot_n "$LOG" 4 /dev/vda4 /dev/vda5 "$GOOD_HASH" "post-auto-revert boot"
 echo "Part 2 OK: unhealthy upgrade auto-reverted to slot B (not a fixed fallback to slot A) and rebooted, entirely on its own"
-echo "Upgrade health test OK: wait_for_health confirms a healthy upgrade and stays, and reverts+reboots automatically on an unhealthy one"
+
+# =========================================================================
+# Part 3: HAProxy itself (not haproxyosd) never comes up - proves
+# cmd/haproxyosd's own real HAProxy-level confirmBootHealth path
+# specifically, not just rootfs/init's Supervisor-level backstop Part 2
+# already covered.
+# =========================================================================
+HAPROXY_BROKEN_SHA256="$(cat "$HAPROXY_BROKEN_BUNDLE/rootfs.squashfs.sha256")"
+HAPROXY_BROKEN_OUT="$("$CTL" "${CTL_ARGS[@]}" lifecycle upgrade -wait-for-health -health-timeout "$HEALTH_TIMEOUT_SECS" -sha256 "$HAPROXY_BROKEN_SHA256" /etc/.state/upgrade-haproxy-broken)"
+echo "$HAPROXY_BROKEN_OUT"
+if ! echo "$HAPROXY_BROKEN_OUT" | grep -qi "rebooting"; then
+  echo "Upgrade health test FAILED: the 'haproxy-broken' upgrade never reached the 'rebooting' stage" >&2
+  exit 1
+fi
+
+# haproxyosd itself is the *real* binary here and starts fine - unlike
+# Part 2, wait on the boot marker AND haproxyosd's own "confirming
+# health" log line, proving this boot's control-plane daemon genuinely
+# came up (not just the kernel), before HAProxy's own absence is what
+# eventually triggers the revert.
+DEADLINE=$((SECONDS + REBOOT_TIMEOUT_SECS))
+while { [ "$(marker_count "$LOG")" -lt 5 ] || ! grep -q "bootcommit: confirming health for slot A" "$LOG"; } && [ "$SECONDS" -lt "$DEADLINE" ]; do sleep 1; done
+if [ "$(marker_count "$LOG")" -lt 5 ]; then
+  echo "Upgrade health test FAILED: boot marker never appeared a fifth time - guest didn't reboot into the 'haproxy-broken' slot" >&2
+  echo "--- console output ---" >&2; cat "$LOG" >&2
+  exit 1
+fi
+if ! grep -q "bootcommit: confirming health for slot A" "$LOG"; then
+  echo "Upgrade health test FAILED: haproxyosd never started its own health confirmation for slot A - did haproxyosd itself fail to start too?" >&2
+  echo "--- console output ---" >&2; cat "$LOG" >&2
+  exit 1
+fi
+HAPROXY_BROKEN_HASH="$(cat "$HAPROXY_BROKEN_BUNDLE/rootfs.roothash")"
+assert_boot_n "$LOG" 5 /dev/vda2 /dev/vda3 "$HAPROXY_BROKEN_HASH" "post-'haproxy-broken'-upgrade boot"
+echo "Slot A (haproxy-broken) OK: haproxyosd itself came up for real and started confirming health"
+
+# The autonomous revert this time comes from cmd/haproxyosd's own
+# confirmBootHealth, not rootfs/init's GiveUpAfter - confirm the
+# distinguishing log line, not just "some revert happened".
+if ! wait_http_and_marker "$HOST_PORT_8080" "$LOG" 6 $((HEALTH_TIMEOUT_SECS + REBOOT_TIMEOUT_SECS)); then
+  echo "Upgrade health test FAILED: no healthy, genuinely-rebooted (6th boot) HTTP 200 after the haproxy-broken upgrade - automatic revert didn't happen" >&2
+  echo "--- console output ---" >&2; cat "$LOG" >&2
+  exit 1
+fi
+if ! grep -q "bootcommit: rebooting to complete the revert to slot B" "$LOG"; then
+  echo "Upgrade health test FAILED: console never logged cmd/haproxyosd's own revert-to-slot-B line" >&2
+  echo "--- console output ---" >&2; cat "$LOG" >&2
+  exit 1
+fi
+assert_boot_n "$LOG" 6 /dev/vda4 /dev/vda5 "$GOOD_HASH" "post-second-auto-revert boot"
+echo "Part 3 OK: HAProxy-level health check (not just haproxyosd process survival) caught a broken HAProxy and reverted+rebooted, entirely on its own"
+
+echo "Upgrade health test OK: wait_for_health confirms a healthy upgrade and stays; reverts+reboots automatically both when haproxyosd itself can't stay up (rootfs/init) and when haproxyosd runs fine but HAProxy never comes up (cmd/haproxyosd's own real health check)"

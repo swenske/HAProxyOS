@@ -30,8 +30,8 @@ import (
 	"time"
 
 	"github.com/swenske/HAProxyOS/internal/bootcommit"
+	"github.com/swenske/HAProxyOS/internal/bootrevert"
 	"github.com/swenske/HAProxyOS/internal/bootslot"
-	"github.com/swenske/HAProxyOS/internal/espswitch"
 )
 
 const daemonPath = "/sbin/haproxyosd"
@@ -261,13 +261,15 @@ func main() {
 	powerOff()
 }
 
-// defaultStableAfter is how long haproxyosd has to keep running before
-// a boot with no pending boot-commit marker (the overwhelming majority
-// of them) is considered "recovered" for Supervisor's own backoff
-// purposes. A pending marker (see checkBootCommit) can override this
-// per-boot via its own HealthTimeoutSeconds, sourced from
-// UpgradeRequest.health_timeout_seconds.
-const defaultStableAfter = 60 * time.Second
+// defaultGiveUpAfter is how long Supervisor keeps restarting a
+// crash-looping haproxyosd, on a boot with a pending boot-commit marker
+// (see checkBootCommit), before giving up on this slot ever coming up
+// at all and reverting - overridden per-boot by the marker's own
+// HealthTimeoutSeconds (UpgradeRequest.health_timeout_seconds) when
+// set. Irrelevant on an ordinary boot (no marker): Supervisor keeps its
+// unconditional "restart forever" policy there, see its own doc
+// comment.
+const defaultGiveUpAfter = 60 * time.Second
 
 func startDaemon(pendingMarker *bootcommit.Marker) {
 	if err := os.MkdirAll("/run/haproxyos", 0o755); err != nil {
@@ -276,34 +278,38 @@ func startDaemon(pendingMarker *bootcommit.Marker) {
 
 	fmt.Println("HAPROXYOS_INIT_BOOT_OK")
 
-	stableAfter := defaultStableAfter
-	if pendingMarker != nil && pendingMarker.HealthTimeoutSeconds > 0 {
-		stableAfter = time.Duration(pendingMarker.HealthTimeoutSeconds) * time.Second
-	}
-
 	sv := &Supervisor{
-		Path:        daemonPath,
-		Args:        []string{"-addr", ":9505"},
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		MinBackoff:  1 * time.Second,
-		MaxBackoff:  30 * time.Second,
-		StableAfter: stableAfter,
-		OnStable:    confirmBootCommit,
+		Path:       daemonPath,
+		Args:       []string{"-addr", ":9505"},
+		Stdout:     os.Stdout,
+		Stderr:     os.Stderr,
+		MinBackoff: 1 * time.Second,
+		MaxBackoff: 30 * time.Second,
+		// StableAfter only matters for Supervisor's own crash-backoff
+		// reset here - real health confirmation for a pending marker
+		// happens inside haproxyosd itself now (cmd/haproxyosd/main.go,
+		// against HAProxy's actual stats socket via
+		// internal/bootcommit.Confirm), not by inference from how long
+		// the haproxyosd *process* merely stayed alive.
+		StableAfter: 60 * time.Second,
 	}
 
 	// A pending marker means this boot is provisional (see
 	// checkBootCommit) - bound how long Supervisor keeps restarting a
-	// haproxyosd that's crash-looping without ever confirming healthy,
-	// instead of the unconditional "restart forever" every other boot
-	// gets. Without this, a slot whose haproxyosd never becomes stable
-	// but also never causes a *kernel*-level reboot on its own (a plain
-	// userspace crash loop, as opposed to a panic) would sit unreachable
-	// forever - checkBootCommit's own cross-boot TriesLeft check only
-	// ever gets a chance to act on a boot *after* this one, which
-	// requires the machine to actually reboot again first.
+	// haproxyosd that's crash-looping so fast, or so often, that it
+	// never gets a real chance to run its own HAProxy-level health
+	// check at all - the one thing haproxyosd's own confirmation logic
+	// can't catch, since it requires haproxyosd to actually be running.
+	// Without this, such a slot would sit unreachable forever:
+	// checkBootCommit's own cross-boot TriesLeft check only ever gets a
+	// chance to act on a boot *after* this one, which requires the
+	// machine to actually reboot again first.
 	if pendingMarker != nil {
-		sv.GiveUpAfter = stableAfter
+		giveUpAfter := defaultGiveUpAfter
+		if pendingMarker.HealthTimeoutSeconds > 0 {
+			giveUpAfter = time.Duration(pendingMarker.HealthTimeoutSeconds) * time.Second
+		}
+		sv.GiveUpAfter = giveUpAfter
 		sv.OnGiveUp = func() { giveUpBootCommit(pendingMarker) }
 	}
 
@@ -312,41 +318,18 @@ func startDaemon(pendingMarker *bootcommit.Marker) {
 
 // giveUpBootCommit is Supervisor's OnGiveUp hook, wired up only when
 // this boot has a pending marker: haproxyosd has been restarted for
-// GiveUpAfter without ever reaching OnStable, so whatever's wrong with
-// this slot isn't fixing itself. Re-reads the marker rather than
-// trusting the one it closed over, since OnStable could have raced it
-// and already cleared it (a legitimately-confirmed boot crashing later,
-// for an unrelated reason, must not trigger a revert) - in which case
-// this is a deliberate no-op.
+// GiveUpAfter without staying up at all, so it never even got a chance
+// to run its own HAProxy-level health check (see cmd/haproxyosd/
+// main.go). Re-reads the marker rather than trusting the one it closed
+// over, since it could have been cleared by something else in the
+// meantime - in which case this is a deliberate no-op.
 func giveUpBootCommit(marker *bootcommit.Marker) {
 	cur, err := bootcommit.Read()
 	if err != nil || cur == nil || cur.Slot != marker.Slot {
 		return
 	}
-	fmt.Printf("init: haproxyosd never stabilized for slot %s - giving up and reverting to slot %s\n", cur.Slot, cur.RevertTo)
+	fmt.Printf("init: haproxyosd never stayed up for slot %s - giving up and reverting to slot %s\n", cur.Slot, cur.RevertTo)
 	revertAndReboot(cur)
-}
-
-// confirmBootCommit is Supervisor's OnStable hook: once haproxyosd has
-// run for the boot's own stableAfter without crashing, whatever
-// wait_for_health boot-commit marker was pending for this slot (see
-// checkBootCommit) is cleared - this boot is good, stop treating it as
-// provisional. A no-op, logging nothing, on the overwhelming majority
-// of boots, which have no marker to clear at all.
-func confirmBootCommit() {
-	marker, err := bootcommit.Read()
-	if err != nil {
-		fmt.Printf("init: read boot-commit marker for confirmation: %v\n", err)
-		return
-	}
-	if marker == nil {
-		return
-	}
-	if err := bootcommit.Clear(); err != nil {
-		fmt.Printf("init: clear boot-commit marker after a stable boot: %v\n", err)
-		return
-	}
-	fmt.Printf("init: boot-commit confirmed for slot %s after a stable boot\n", marker.Slot)
 }
 
 // checkBootCommit runs after mountState (needs bootcommit.Dir already
@@ -423,41 +406,20 @@ func checkBootCommit() *bootcommit.Marker {
 	return nil
 }
 
-// revertAndReboot switches the ESP back to marker.RevertTo (the exact
-// mechanism LifecycleService.Rollback uses, just triggered locally
-// instead of over gRPC), clears the marker, and reboots - the success
-// path never returns, since PID 1 must not fall through to starting
-// haproxyosd on a slot that just proved itself unhealthy. Called from
-// two places: checkBootCommit (a *later* boot finding tries already
-// exhausted) and giveUpBootCommit (this *same* boot, once Supervisor's
-// GiveUpAfter elapses without ever reaching OnStable) - the two paths
-// that can conclude a slot isn't coming up healthy, one crossing a
-// reboot to find out and one not needing to.
+// revertAndReboot switches the ESP back to marker.RevertTo and clears
+// the marker (internal/bootrevert.To - the same helper
+// cmd/haproxyosd's own HAProxy-level revert path uses), then reboots -
+// the success path never returns, since PID 1 must not fall through to
+// starting haproxyosd on a slot that just proved itself unhealthy.
+// Called from two places: checkBootCommit (a *later* boot finding
+// tries already exhausted) and giveUpBootCommit (this *same* boot,
+// once Supervisor's GiveUpAfter elapses without haproxyosd ever staying
+// up) - the two paths that can conclude a slot isn't coming up at all,
+// one crossing a reboot to find out and one not needing to.
 func revertAndReboot(marker *bootcommit.Marker) {
-	cmdline, err := os.ReadFile("/proc/cmdline")
-	if err != nil {
-		fmt.Printf("init: read /proc/cmdline to revert: %v\n", err)
-		return
-	}
-	dataDev, ok := bootslot.DataDevice(string(cmdline))
-	if !ok {
-		fmt.Println("init: couldn't parse /proc/cmdline to revert")
-		return
-	}
-	espDevice, ok := bootslot.ESPDevice(dataDev)
-	if !ok {
-		fmt.Printf("init: couldn't derive the ESP device from %s, cannot revert\n", dataDev)
-		return
-	}
-	if err := espswitch.Activate(espDevice, marker.RevertTo); err != nil {
+	if err := bootrevert.To(marker); err != nil {
 		fmt.Printf("init: revert to slot %s failed: %v\n", marker.RevertTo, err)
-		if err := bootcommit.Clear(); err != nil {
-			fmt.Printf("init: clear boot-commit marker: %v\n", err)
-		}
 		return
-	}
-	if err := bootcommit.Clear(); err != nil {
-		fmt.Printf("init: clear boot-commit marker: %v\n", err)
 	}
 	syscall.Sync()
 

@@ -630,69 +630,86 @@ plan - not implemented yet.
   the same slot - if this one never confirms - finds it already
   exhausted and reverts immediately, without giving it a third try) or,
   finding tries already exhausted, reverts straight away without ever
-  starting `haproxyosd` at all this boot. Confirmation itself piggybacks
-  on `Supervisor`'s own stability tracking (`rootfs/init/supervisor.go`)
-  rather than inventing a separate mechanism: a new `OnStable` hook
-  fires - proactively, via its own timer, not just retroactively derived
-  from an eventual crash the way the existing backoff-reset already
-  worked - once the current `haproxyosd` instance has run for
-  `StableAfter`, and `rootfs/init` wires that hook to clear the marker.
-  Symmetrically, a new `GiveUpAfter`/`OnGiveUp` pair on `Supervisor`
-  bounds how long it keeps restarting a crash-looping `haproxyosd`
+  starting `haproxyosd` at all this boot.
+  Confirmation itself is now a *real* HAProxy-level check, not an
+  inference from process survival: `cmd/haproxyosd`, once it starts,
+  checks for a pending marker and - in the background, so it never
+  delays the gRPC server coming up - polls HAProxy's own stats socket
+  (`internal/haproxy.Manager.ShowInfo`) via a new
+  `internal/bootcommit.Confirm` until it succeeds several times in a
+  row, then clears the marker itself. If that never happens within
+  `HealthTimeoutSeconds`, `haproxyosd` reverts and reboots itself,
+  directly - no RPC, no `rootfs/init` involvement needed for this path.
+  A first version of this piggybacked on `Supervisor`'s own stability
+  tracking instead (a proactive `OnStable` hook, firing once the
+  `haproxyosd` *process* had merely stayed up for a while) - reused as
+  the confirmation signal only briefly, and removed once real
+  HAProxy-level confirmation landed: the two would have raced (a
+  process-survival signal firing before, or after, the real health
+  check, either clearing the marker prematurely on a genuinely broken
+  HAProxy or double-reverting), and the weaker signal added nothing the
+  stronger one didn't already cover.
+  `rootfs/init`'s own `Supervisor.GiveUpAfter`/`OnGiveUp` stays, but
+  narrows to the one thing `cmd/haproxyosd`'s own check structurally
+  can't catch: `haproxyosd` crashing too fast, or too often, to ever
+  reach the point of running its own confirmation loop at all - bounded
   *only* when a marker is pending (every other boot keeps the
   unconditional "restart forever" policy this package has always had,
-  see its own doc comment) - without this, a slot whose `haproxyosd`
-  crash-loops forever without ever causing a *kernel*-level reboot on
-  its own would just sit unreachable, since the cross-boot `tries_left`
-  check only ever gets a chance to act on a *later* boot. Both hooks
-  share one `revertAndReboot` helper, itself built on a new
-  `internal/espswitch` package factored out of `Rollback`'s own ESP-swap
-  logic once there were two real consumers of the exact same "mount the
-  ESP, copy a slot's pre-staged UKI over `BOOTX64.EFI`" mechanism - one
-  driven by a gRPC call, one triggered locally by `rootfs/init` itself.
+  see its own doc comment). Without it, such a slot would sit
+  unreachable forever: the cross-boot `tries_left` check only ever gets
+  a chance to act on a *later* boot, which requires the machine to
+  reboot again first. The two mechanisms are complementary, each the
+  *only* one that can catch its respective failure - `Supervisor` has no
+  visibility into HAProxy's health, and `haproxyosd` can't act if it
+  never gets to run.
+  Both revert paths share one `internal/bootrevert.To` helper
+  (resolve the ESP device from `/proc/cmdline`, `internal/espswitch.
+  Activate` the target slot, clear the marker - stopping short of the
+  actual reboot, since `rootfs/init` blocks forever afterward as PID 1
+  must, while `haproxyosd` just issues one and lets the whole machine go
+  down with it), itself built on `internal/espswitch` - factored out of
+  `Rollback`'s own inline ESP-swap logic once `rootfs/init`'s local
+  revert became a second real consumer of the identical mechanism.
   None of this is visible over the original `Upgrade` call's own gRPC
   stream: by the time a revert might happen, that connection died with
   the first reboot, so a caller only ever sees the eventual outcome by
   reconnecting later (`SystemService.Version`, or simply which port
-  answers), never a `"rolled-back"` stream message. What "healthy" means
-  here is deliberately limited, and documented as such in
-  `internal/bootcommit`'s own package doc: the control-plane daemon
-  started and kept running for the confirmation window, nothing more -
-  no HAProxy-level health check (its own stats socket, say) feeds into
-  this yet.
-  Proven with a real gRPC call both directions, via `hack/
+  answers), never a `"rolled-back"` stream message.
+  Proven with a real gRPC call, three ways, via `hack/
   qemu-lifecycle-upgrade-health-test.sh`: boots slot A, then calls
-  `Upgrade(wait_for_health=true)` twice against the same running node -
-  once with a "good" bundle (just the existing v1 rootfs, repackaged;
+  `Upgrade(wait_for_health=true)` three times against the same running
+  node - a "good" bundle (just the existing v1 rootfs, repackaged;
   genuinely-new-content is what the *other* Upgrade test already
   proves, this one is purely about the health-check/revert mechanics)
-  and once with a "broken" one, a *fresh* rootfs built with the host's
-  own dynamically-linked `/bin/false` standing in for `haproxyosd` -
+  must show `"bootcommit: confirmed healthy"` and never revert; a
+  "broken" bundle, a *fresh* rootfs with the host's own
+  dynamically-linked `/bin/false` standing in for `haproxyosd` itself -
   since this rootfs ships no dynamic linker or libc at all (every real
   binary in it is statically linked, by design), `Supervisor` doesn't
   even get as far as a successful `exec`, hitting its spawn-failure path
-  on every single restart attempt, a realistic simulation of a badly
-  built or wrong-architecture control-plane binary landing in a release
-  bundle. The good half must show `"boot-commit confirmed"` in the
-  console log and never revert; the broken half must show the guest
-  rebooting into the broken slot, then - with **no RPC call from the
-  test driving it** - `"giving up and reverting to slot B"` and a
-  further, genuinely autonomous reboot back to whichever slot was
-  active *when the broken Upgrade was called* (B, not a hardcoded
-  fallback to the original slot A - proving the revert target is
-  dynamic). Both halves are checked via the same real-boot evidence
-  `hack/qemu-uefi-ab-boot-test.sh` established: the kernel's own "Kernel
-  command line:" log line, at specific boot numbers, referencing the
-  expected slot's partitions and root hash.
+  on every restart attempt, a realistic simulation of a badly built or
+  wrong-architecture control-plane binary - must show the guest
+  rebooting into it, then autonomously - **no RPC call from the test
+  driving it** - `"giving up and reverting to slot B"`
+  (`Supervisor.GiveUpAfter`, proving that backstop specifically); and a
+  third, "haproxy-broken" bundle, with the *real* `haproxyosd` but
+  `/bin/false` standing in for *haproxy* this time, must show
+  `haproxyosd` itself coming up fine and logging its own confirmation
+  attempt, then - again fully autonomous - `"bootcommit: rebooting to
+  complete the revert"` (`cmd/haproxyosd`'s own check specifically, not
+  the `Supervisor` backstop). All three reverts land back on whichever
+  slot was active *when that particular Upgrade was called*, not a
+  hardcoded fallback to the original slot A. Every boot is checked via
+  the same real evidence `hack/qemu-uefi-ab-boot-test.sh` established:
+  the kernel's own "Kernel command line:" log line, at specific boot
+  numbers, referencing the expected slot's partitions and root hash.
   Still open: `LifecycleService.Install` (bare-metal provisioning of a
   fresh, unpartitioned disk - needs a Go-native GPT/FAT builder, since
   `sgdisk`/`mtools`/`ukify` don't exist on the target OS any more than
   they do at runtime for `Rollback`/`Upgrade`, and unlike those two,
-  `Install` has no existing partition table to build on), a real
-  HAProxy-level health check feeding into `wait_for_health` (today it's
-  daemon-survival only, see above), and a real production signing key
-  (the test key above is exactly that - a test key) are still separate,
-  unbuilt pieces.
+  `Install` has no existing partition table to build on), and a real
+  production signing key (the test key above is exactly that - a test
+  key) are still separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

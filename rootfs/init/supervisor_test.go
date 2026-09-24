@@ -132,65 +132,6 @@ func TestSupervisorIgnoresUnrelatedChildren(t *testing.T) {
 	}
 }
 
-// TestSupervisorOnStableFires proves OnStable fires proactively, while
-// the process is still running - not just retroactively derived from
-// its eventual exit the way the backoff reset is - by using a process
-// that outlives StableAfter by a wide margin and checking the callback
-// already ran *before* runOnce itself returns.
-func TestSupervisorOnStableFires(t *testing.T) {
-	shPath := lookPath(t, "sh")
-
-	var fired int32
-	s := &Supervisor{
-		Path:        shPath,
-		Args:        []string{"-c", "sleep 1"},
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		MinBackoff:  5 * time.Millisecond,
-		MaxBackoff:  20 * time.Millisecond,
-		StableAfter: 20 * time.Millisecond,
-		OnStable:    func() { atomic.AddInt32(&fired, 1) },
-	}
-
-	start := time.Now()
-	s.runOnce(s.MinBackoff)
-	elapsed := time.Since(start)
-
-	if atomic.LoadInt32(&fired) != 1 {
-		t.Fatalf("OnStable fired %d times, want exactly 1", fired)
-	}
-	if elapsed < s.StableAfter {
-		t.Fatalf("runOnce returned after %v, before StableAfter (%v) even elapsed - OnStable couldn't have fired proactively", elapsed, s.StableAfter)
-	}
-}
-
-// TestSupervisorOnStableDoesNotFireOnFastCrash proves the timer is
-// actually cancelled, not just racing the exit - a process that exits
-// well before StableAfter must never trigger OnStable at all.
-func TestSupervisorOnStableDoesNotFireOnFastCrash(t *testing.T) {
-	truePath := lookPath(t, "true")
-
-	var fired int32
-	s := &Supervisor{
-		Path:        truePath,
-		Stdout:      os.Stdout,
-		Stderr:      os.Stderr,
-		MinBackoff:  5 * time.Millisecond,
-		MaxBackoff:  20 * time.Millisecond,
-		StableAfter: time.Hour,
-		OnStable:    func() { atomic.AddInt32(&fired, 1) },
-	}
-
-	s.runOnce(s.MinBackoff)
-	// The cancellation happens synchronously (close(stopStableTimer))
-	// before runOnce returns, so there's no meaningful race to wait out
-	// here - if it were going to fire wrongly, it would need StableAfter
-	// (an hour) to do so, which this test isn't going to wait for.
-	if atomic.LoadInt32(&fired) != 0 {
-		t.Fatalf("OnStable fired %d times for a process that exited immediately, want 0", fired)
-	}
-}
-
 // TestSupervisorGiveUpAfterStopsRestarting proves Run actually returns
 // (instead of restarting forever, its behavior with GiveUpAfter unset)
 // once a crash-looping child has been retried past GiveUpAfter, and

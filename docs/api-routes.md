@@ -66,7 +66,7 @@ are also technically non-mutating).
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
 | `Install` | server | ⬜ | First install to a target disk |
-| `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health` auto-reverts if the new slot's daemon never stays up long enough to confirm (daemon-survival health check only, not HAProxy-level yet) |
+| `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health` auto-reverts if the new slot's HAProxy (real stats-socket check) never comes up healthy in time, or if haproxyosd itself never stays running long enough to check |
 | `Rollback` | | ✅ | Switch back to the other A/B slot, reboot |
 
 ## HAProxyService

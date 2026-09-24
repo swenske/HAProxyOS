@@ -24,12 +24,15 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
 	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
 	"github.com/swenske/HAProxyOS/internal/api"
+	"github.com/swenske/HAProxyOS/internal/bootcommit"
+	"github.com/swenske/HAProxyOS/internal/bootrevert"
 	"github.com/swenske/HAProxyOS/internal/haproxy"
 	"github.com/swenske/HAProxyOS/internal/pki"
 )
@@ -108,6 +111,19 @@ func main() {
 		log.Printf("haproxy: initial start failed (continuing without it): %v", err)
 	}
 
+	// If rootfs/init's checkBootCommit left a pending wait_for_health
+	// marker for this boot, confirm it against HAProxy's *actual*
+	// health - not just "this daemon process is still running", which
+	// says nothing about whether haproxy itself ever came up - and
+	// revert automatically if it never does. Runs in the background:
+	// gRPC must start regardless, and a marker (the rare case) shouldn't
+	// delay it.
+	if marker, err := bootcommit.Read(); err != nil {
+		log.Printf("bootcommit: read marker: %v", err)
+	} else if marker != nil {
+		go confirmBootHealth(marker, haproxyMgr)
+	}
+
 	tlsConfig := pkiBootstrap.CA.ServerTLSConfig(pkiBootstrap.ServerCert)
 	srv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
@@ -124,5 +140,57 @@ func main() {
 		fmt.Fprintln(os.Stderr, "serve:", err)
 		os.Exit(1)
 	}
+}
+
+// healthPollInterval/healthStableChecks bound how quickly a genuinely
+// healthy HAProxy gets confirmed: 3 consecutive successful checks,
+// 500ms apart, is enough to rule out a single fluke (a check that
+// raced startup, say) without adding a slow, arbitrary-feeling delay
+// on top of an already-real signal.
+const (
+	healthPollInterval   = 500 * time.Millisecond
+	healthStableChecks   = 3
+	defaultHealthTimeout = 60 * time.Second // used if the marker's own HealthTimeoutSeconds is unset
+)
+
+// confirmBootHealth runs internal/bootcommit.Confirm against a real
+// HAProxy health signal (ShowInfo succeeding means the stats socket is
+// up and answering, which requires the haproxy process itself to
+// actually be running - not just that this daemon, haproxyosd, is)
+// and, on failure, reverts back to marker.RevertTo the same way
+// rootfs/init's own boot-time revert path does (internal/bootrevert),
+// then reboots. Meant to run in its own goroutine - it blocks for up to
+// the marker's own health-timeout.
+func confirmBootHealth(marker *bootcommit.Marker, mgr *haproxy.Manager) {
+	log.Printf("bootcommit: confirming health for slot %s (revert to %s if it never comes up)", marker.Slot, marker.RevertTo)
+
+	confirmed, err := bootcommit.Confirm(marker,
+		func() error {
+			_, err := mgr.ShowInfo()
+			return err
+		},
+		func() error {
+			if err := bootrevert.To(marker); err != nil {
+				return err
+			}
+			syscall.Sync()
+			log.Printf("bootcommit: rebooting to complete the revert to slot %s", marker.RevertTo)
+			return syscall.Reboot(syscall.LINUX_REBOOT_CMD_RESTART)
+		},
+		healthPollInterval, healthStableChecks, defaultHealthTimeout)
+
+	if err != nil {
+		// Either Clear() failed on the confirm path, or the revert
+		// itself failed - either way, this node may now be stuck on an
+		// unconfirmed slot with no automatic recovery left, worth
+		// logging loudly rather than just silently returning.
+		log.Printf("bootcommit: %v", err)
+		return
+	}
+	if confirmed {
+		log.Printf("bootcommit: confirmed healthy for slot %s", marker.Slot)
+	}
+	// !confirmed && err == nil: the revert (and reboot) succeeded -
+	// nothing further to do, the machine is already on its way down.
 }
 
