@@ -49,7 +49,18 @@ DM_TABLE="$(dirname "$0")/../../hack/dm-verity-cmdline.sh"
 CMDLINE_FILE="$(mktemp)"
 trap 'rm -f "$CMDLINE_FILE"' EXIT
 {
-  printf 'console=ttyS0 panic=-1 dm-mod.create="%s" root=/dev/dm-0 rootfstype=squashfs ro ip=dhcp' \
+  # enforcing=1: Phase 4 cont'd's real SELinux policy (selinux/) already
+  # proved a clean, zero-denial boot under enforcing mode (see
+  # hack/qemu-selinux-test.sh) - this is what actually makes that the
+  # shipped default rather than just a fact proven about a test boot.
+  # kernel/configs/haproxyos_defconfig's own SECURITY_SELINUX_DEVELOP=y
+  # deliberately stays on regardless (so /sys/fs/selinux/enforce can
+  # still be toggled interactively for debugging, and the kernel's own
+  # default without this cmdline override would still be the safer
+  # permissive one) - this UKI-baked cmdline is what makes enforcing the
+  # real, permanent default in practice, since there's no boot menu to
+  # add it from later.
+  printf 'console=ttyS0 panic=-1 dm-mod.create="%s" root=/dev/dm-0 rootfstype=squashfs ro ip=dhcp enforcing=1' \
     "$("$DM_TABLE" "$ROOTFS_DIR" "$DATA_DEV" "$HASH_DEV")"
 } > "$CMDLINE_FILE"
 

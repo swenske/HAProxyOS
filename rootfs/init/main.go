@@ -38,11 +38,18 @@ import (
 const daemonPath = "/sbin/haproxyosd"
 
 func mount(source, target, fstype string) {
+	mountData(source, target, fstype, "")
+}
+
+// mountData is mount() with an explicit mount-options string (the
+// syscall's own "data" argument) - only mountState needs this, to force
+// a fixed SELinux context via the "context=" mount option (below).
+func mountData(source, target, fstype, data string) {
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		fmt.Printf("init: mkdir %s: %v\n", target, err)
 		return
 	}
-	if err := syscall.Mount(source, target, fstype, 0, ""); err != nil {
+	if err := syscall.Mount(source, target, fstype, 0, data); err != nil {
 		fmt.Printf("init: mount %s on %s: %v\n", fstype, target, err)
 	}
 }
@@ -135,7 +142,27 @@ func mountState() {
 	// past that failed MkdirAll silently no-op'd (mount()/bindMount()
 	// only log and return on error, never abort the boot).
 	const stateRoot = "/etc/.state"
-	mount(resolveStateDevice(), stateRoot, "ext4")
+	// Phase 4 cont'd (SELinux): "context=" forces every file on this
+	// mount to a single fixed SELinux context, ignoring any per-inode
+	// xattr entirely - the same role genfscon plays for a
+	// non-xattr-capable filesystem like the ESP's FAT, used here
+	// instead of relying on selinux/policy.conf's own `fs_use_xattr
+	// ext4 ... state_t` statement's fallback behavior. A real boot
+	// caught why that fallback doesn't do what it sounds like it
+	// should: an inode with no security.selinux xattr set (every inode
+	// on this partition - rootfs/state-image.sh's mkfs.ext4 never sets
+	// one) doesn't fall back to the fs_use_xattr statement's own
+	// context at all, it falls back to the "file" initial SID
+	// (SECINITSID_FILE, mapped to squashfs_t in this policy) instead -
+	// which only happened to look like it worked for the read-only
+	// rootfs because that mapping coincidentally already IS squashfs_t
+	// there. On STATE it meant every write to a freshly-formatted
+	// partition's root directory - including the very first
+	// os.MkdirAll("/etc/.state/pki") - was denied under enforcing=1 as
+	// squashfs_t, not state_t, "avc: denied { write } ... tcontext=
+	// ...squashfs_t ... permissive=0". "context=" sidesteps the whole
+	// xattr/fallback question rather than working around it.
+	mountData(resolveStateDevice(), stateRoot, "ext4", "context=system_u:object_r:state_t")
 
 	// pki/: created with 0700 directly (matching
 	// internal/pki.LoadOrBootstrap's own intent) rather than mounting

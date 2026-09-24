@@ -973,15 +973,51 @@ plan - not implemented yet.
   `enforcing=1` boot tried, once the permissive rounds above reached
   zero denials.
 
-  SELinux stays permissive by *default* in the shipped kernel config
-  (`SECURITY_SELINUX_DEVELOP=y`, no `enforcing=1` baked into any UKI's
-  cmdline yet) even though this slice proves enforcing already works
-  cleanly end to end - flipping the shipped default is a separate,
-  deliberate decision this slice doesn't make on its own: it raises the
-  stakes of any *future* change (a new file, a new syscall a binary
-  starts making) tripping an uncovered denial and actually breaking a
-  boot, rather than just logging one, and deserves its own explicit
-  go-ahead rather than riding in on this slice.
+  SELinux enforcing by default, third slice: `image/uki/assemble.sh`'s
+  baked-in cmdline now carries `enforcing=1` permanently - the actual
+  production default, since there's no boot menu to add it from later
+  and every real node boots via this exact UKI. `kernel/configs/
+  haproxyos_defconfig`'s `SECURITY_SELINUX_DEVELOP=y` deliberately
+  stays on regardless (keeps `/sys/fs/selinux/enforce` toggleable for
+  debugging, and the kernel's own compiled-in default without this
+  cmdline override would still be the safer permissive one - this UKI
+  cmdline change is what actually makes enforcing real, not a kernel
+  rebuild). Flipping this surfaced a real gap the earlier, narrower
+  `hack/qemu-selinux-test.sh` boot (squashfs+verity only, no STATE
+  drive attached at all) had never exercised: every one of this
+  project's *other* real boot tests goes through a real, single-disk,
+  genuinely-partitioned STATE ext4 mount instead, and that mount failed
+  outright under real `enforcing=1` the first time it was tried
+  end-to-end (`hack/qemu-lifecycle-rollback-test.sh`, caught before any
+  of the others were even retried). The real cause was a wrong
+  assumption about `fs_use_xattr`'s own fallback semantics: an inode
+  with no `security.selinux` xattr set (every inode on
+  `rootfs/state-image.sh`'s freshly-`mkfs.ext4`'d image, since nothing
+  ever wrote one) does *not* fall back to the `fs_use_xattr` statement's
+  own default context - it falls back to the "file" initial SID
+  (`SECINITSID_FILE`, mapped to `squashfs_t` in this policy) instead,
+  which only ever looked correct for the read-only rootfs because that
+  mapping happened to already *be* `squashfs_t` there. The very first
+  `os.MkdirAll("/etc/.state/pki")` on a freshly-mounted STATE partition
+  was denied as a write to `squashfs_t`, not `state_t` -
+  `"avc: denied { write } ... tcontext=...squashfs_t ... permissive=0"`.
+  Fixed properly, not worked around: `rootfs/init/main.go`'s
+  `mountState` now mounts STATE with the SELinux `context=` mount
+  option (`mountData`, a new small variant of the shared `mount()`
+  helper that also passes a mount-options string), forcing every file
+  on that mount to a single fixed `state_t` context outright - the same
+  role `genfscon` already plays for the ESP's non-xattr-capable FAT,
+  used here instead of relying on `fs_use_xattr`'s per-inode fallback
+  at all. That itself needed one more real permission
+  (`filesystem:{relabelfrom,relabelto}` on `state_t` for `init_t` - the
+  `context=` option is itself a relabel operation, caught by a second
+  real denial once the first was fixed). Every UEFI-boot-dependent test
+  in this project - `qemu-uefi-boot-test`, `qemu-uefi-ab-boot-test`,
+  `qemu-lifecycle-rollback-test`, `qemu-lifecycle-upgrade-test`,
+  `qemu-lifecycle-upgrade-health-test`, `lifecycle-install-test`,
+  `qemu-secureboot-test` - was re-run locally after the fix and passes
+  clean under real `enforcing=1`, not just the original
+  `hack/qemu-selinux-test.sh` boot.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
   (separate container from the runner) + remote kernel-menuconfig UI -
