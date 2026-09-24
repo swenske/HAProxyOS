@@ -529,10 +529,10 @@ plan - not implemented yet.
   Proven with a real gRPC call, not just that the underlying mechanism
   works when driven directly: `hack/qemu-lifecycle-rollback-test.sh`
   boots slot A, extracts `ca.crt`/`admin.crt`/`admin.key` straight from
-  `disk.img`'s STATE partition via `debugfs` (haproxyosd only ever
-  prints the admin cert/key to the console once, on first boot, and
-  never the CA cert at all, by design - there's nothing on the console
-  to trust a fresh external connection with), calls `haproxyosctl
+  `disk.img`'s STATE partition via `debugfs` - haproxyosd prints all
+  three to the console once, on first boot (see `cmd/haproxyosd/
+  main.go`), but a script can't watch a live console the way a real
+  operator would - calls `haproxyosctl
   lifecycle rollback` over real mTLS, and - this is the one boot test in
   the whole project that does **not** pass `-no-reboot` to QEMU - watches
   the guest genuinely reboot itself inside the same QEMU process and

@@ -68,6 +68,17 @@ func main() {
 	}
 	if pkiBootstrap.AdminIssued {
 		log.Printf("pki: first boot - generated a new CA and admin client certificate in %s", *pkiDir)
+		// The CA cert isn't secret (it only lets a client verify the
+		// server's identity, not authenticate as anyone) - printed
+		// alongside the admin cert/key anyway, not just left to a
+		// separate STATE-partition extraction, since a console reader
+		// bootstrapping a node needs all three to actually connect
+		// (haproxyosctl's -ca/-cert/-key) and splitting them across two
+		// different recovery paths for one single one-time event was
+		// real friction, not a meaningful security boundary - whoever
+		// can read this console already has the admin cert/key printed
+		// right below, which is the actually sensitive half.
+		log.Printf("pki: CA CERTIFICATE (needed for haproxyosctl's -ca flag):\n%s", pkiBootstrap.CA.CertPEM)
 		log.Printf("pki: ADMIN CERTIFICATE (save this now, it will not be printed again):\n%s%s", pkiBootstrap.AdminCertPEM, pkiBootstrap.AdminKeyPEM)
 		// pkiDir may be the Phase 3 cont'd persistent STATE partition
 		// (see rootfs/init/main.go's mountState) - force these bytes to

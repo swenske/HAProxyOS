@@ -45,8 +45,9 @@
 #      inspection could tell.
 #   6. extract fresh PKI creds from the *booted* instance's own STATE
 #      partition (via debugfs, same reasoning as every other lifecycle
-#      test here - haproxyosd never prints a CA cert to the console),
-#      then call `haproxyosctl lifecycle install` against /dev/vda -
+#      test here - a script can't watch a live console the way a human
+#      doing this for real would), then call `haproxyosctl lifecycle
+#      install` against /dev/vda -
 #      the disk this now-running instance actually booted from - and
 #      confirm it's refused (refuseIfCurrentBootDisk). This is the one
 #      guard that structurally can't be tested in step 2-4's native

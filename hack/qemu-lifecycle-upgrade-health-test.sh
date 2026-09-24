@@ -10,8 +10,8 @@
 #
 #   1. boot the existing disk.img (slot A active) for real, confirm
 #      HTTP 200, extract PKI creds from STATE via debugfs (same
-#      reasoning as hack/qemu-lifecycle-upgrade-test.sh: haproxyosd
-#      never prints a CA cert to the console at all).
+#      reasoning as hack/qemu-lifecycle-upgrade-test.sh: a script can't
+#      watch a live console the way a human doing this for real would).
 #   2. build two release bundles and inject *both* into disk.img's
 #      STATE partition before ever booting it (same debugfs-before-
 #      first-boot reasoning as hack/qemu-lifecycle-upgrade-test.sh -

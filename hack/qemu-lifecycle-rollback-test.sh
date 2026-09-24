@@ -12,11 +12,12 @@
 #      STATE partition (partition 6) via `debugfs dump`, entirely
 #      offline (no mount, no loop device, same reasoning as
 #      hack/qemu-state-persist-test.sh's own debugfs use) - haproxyosd
-#      only ever prints the admin cert/key to the *console* once, and
-#      there's no CA cert there at all to trust a fresh connection with
-#      (by design - see cmd/haproxyosd/main.go), so this reads them the
-#      way a real out-of-band provisioning step would: from the STATE
-#      partition directly, before or without ever touching the console.
+#      does print all three (CA cert included, see cmd/haproxyosd/
+#      main.go) to the console once, on first boot, but a script can't
+#      watch a live console the way a human doing this for real would,
+#      so this reads them the way a real out-of-band provisioning step
+#      could too: from the STATE partition directly, before or without
+#      ever touching the console.
 #   3. call `haproxyosctl lifecycle rollback` over real mTLS, against
 #      the running node's gRPC port - must return "active slot: B".
 #   4. this QEMU instance is run WITHOUT -no-reboot, unlike every other

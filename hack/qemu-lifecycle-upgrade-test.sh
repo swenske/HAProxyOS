@@ -15,10 +15,11 @@
 #   3. inject the v2 bundle's 4 files into disk.img's STATE partition
 #      *before ever booting it* (under a new "upgrade/" directory,
 #      via debugfs -w), then extract ca.crt/admin.crt/admin.key back
-#      out the same way, after boot A (haproxyosd never prints a CA
-#      cert to the console at all, by design). Both have to happen
-#      through debugfs directly on the image file, never through a
-#      live mount from the host: haproxyosctl (host) and haproxyosd
+#      out the same way, after boot A (haproxyosd does print all three
+#      to the console on first boot, but a script can't watch a live
+#      console the way a human doing this for real would). Both have
+#      to happen through debugfs directly on the image file, never
+#      through a live mount from the host: haproxyosctl (host) and haproxyosd
 #      (guest) don't share a filesystem across the QEMU host/guest
 #      boundary, unlike CLAUDE.md's normal "share a filesystem" case -
 #      and writing to STATE from the host while the guest *also* has
