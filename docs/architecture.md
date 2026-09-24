@@ -575,12 +575,65 @@ plan - not implemented yet.
   key: the signed UKI must boot; an *unsigned* UKI, on the exact same
   enrolled vars, must be refused by firmware itself (`grep`s the
   console for "Access Denied"), never even reaching the kernel.
-  Still open: `LifecycleService.Install`/`Upgrade` (need to write a
-  genuinely new rootfs image into the inactive slot, plus a post-reboot
-  health check with automatic rollback - both slots are still
-  identical, static content today) and a real production signing key
-  (the test key above is exactly that - a test key) are still separate,
-  unbuilt pieces.
+  `LifecycleService.Upgrade` is now real too: it writes a *genuinely
+  new* rootfs into the currently-inactive A/B slot from a local
+  "release bundle" directory (`image/release/assemble.sh`:
+  `rootfs.squashfs`/`rootfs.verity`/`uki-a.efi`/`uki-b.efi`), then
+  switches the ESP and reboots - the same core trick `Rollback` uses
+  (move an already-built UKI into place, never build one on the node),
+  except the UKI comes from the bundle instead of from what
+  `activate-slot.sh` already staged, because a genuinely new rootfs has
+  a root hash nobody could have pre-staged at the original image's
+  build time. `req.Source.Reference` is a local bundle directory path
+  for now - real OCI/HTTPS distribution isn't built yet, a separate,
+  distinct concern from the actual upgrade mechanics this proves.
+  `wait_for_health` isn't implemented either (`Upgrade` always reboots
+  immediately, explicitly returning `codes.Unimplemented` if a caller
+  asks for it) - real automatic rollback-on-unhealthy-boot needs a
+  persistent "boot pending confirmation" marker on STATE that the
+  *next* boot checks and clears (or reverts from, if some earlier boot
+  crashed before ever clearing it), and none of that bookkeeping exists
+  yet; promising it now would be dishonest about what the code actually
+  does. `internal/bootslot` grew `SlotDataDevice`/`SlotHashDevice`/
+  `Disk` for this - the reverse direction from `ActiveSlot` (given a
+  slot, find *its* partitions, not "which slot is currently running").
+  Proven with a real gRPC call, via `hack/qemu-lifecycle-upgrade-test.sh`:
+  boots slot A, builds a second rootfs with genuinely different content
+  (different squashfs, different root hash), injects its release bundle
+  into `disk.img`'s STATE partition via `debugfs` *before* the first
+  boot (`haproxyosctl` and `haproxyosd` don't share a filesystem across
+  this QEMU host/guest boundary, unlike this project's usual "share a
+  filesystem" case - and writing to STATE from the host while the guest
+  also has it mounted read-write would corrupt it, which is exactly why
+  the injection happens before the first boot rather than concurrently
+  with a running one), then drives a real `haproxyosctl lifecycle
+  upgrade` call and watches the guest genuinely reboot itself into the
+  new content, same `-no-reboot`-free pattern as the Rollback test.
+  A real bug was found writing this test - not in `Upgrade` itself, but
+  in the test's own first assumption: it gave the v2 rootfs a
+  bootstrap HAProxy config bound to a different port, expecting that
+  port to answer as proof v2 was running. It never did, because STATE
+  is **one partition shared by both A/B slots**, not duplicated per
+  slot, and `rootfs/init/main.go`'s `seedPersistentHaproxyCfg`
+  deliberately never overwrites an already-persisted config - so slot
+  B, booting after slot A already persisted its own config onto that
+  shared STATE, just keeps serving what slot A left there. This is
+  correct, intended behavior (an upgrade must never reset a node's
+  live-applied HAProxy config back to some bootstrap default) - what
+  was wrong was the test's verification method, not the production
+  code. Fixed by proving genuinely new content took effect the same way
+  `hack/qemu-uefi-ab-boot-test.sh` proves a slot switch did: reading the
+  kernel's own "Kernel command line:" log line back and checking it
+  references the new slot's partitions and root hash, not which HTTP
+  port answers.
+  Still open: `LifecycleService.Install` (bare-metal provisioning of a
+  fresh, unpartitioned disk - needs a Go-native GPT/FAT builder, since
+  `sgdisk`/`mtools`/`ukify` don't exist on the target OS any more than
+  they do at runtime for `Rollback`/`Upgrade`, and unlike those two,
+  `Install` has no existing partition table to build on), `Upgrade`'s
+  `wait_for_health` + automatic rollback, and a real production signing
+  key (the test key above is exactly that - a test key) are still
+  separate, unbuilt pieces.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

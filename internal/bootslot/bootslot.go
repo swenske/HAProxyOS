@@ -137,3 +137,44 @@ func OtherSlot(slot string) string {
 		return slot
 	}
 }
+
+// SlotDataDevice and SlotHashDevice derive a *given* slot's own
+// data/hash partition devices on the given disk - the reverse
+// direction from ActiveSlot (which goes device -> slot, given the
+// currently-booted one): these go slot -> device, for a slot that
+// isn't necessarily the one currently running (e.g.
+// LifecycleService.Upgrade writing to the *inactive* slot). ok is
+// false for anything other than "A" or "B".
+func SlotDataDevice(disk, slot string) (string, bool) {
+	switch slot {
+	case "A":
+		return disk + "2", true
+	case "B":
+		return disk + "4", true
+	default:
+		return "", false
+	}
+}
+
+func SlotHashDevice(disk, slot string) (string, bool) {
+	switch slot {
+	case "A":
+		return disk + "3", true
+	case "B":
+		return disk + "5", true
+	default:
+		return "", false
+	}
+}
+
+// Disk strips the trailing partition number off a partition device
+// path (e.g. "/dev/vda2" -> "/dev/vda") - the same split
+// diskAndPartition does internally, exported for callers (like
+// LifecycleService.Upgrade) that need the disk itself to derive a
+// *different* slot's devices via SlotDataDevice/SlotHashDevice, not
+// just the fixed STATE/ESP partitions StateDevice/ESPDevice already
+// cover.
+func Disk(dataDev string) (string, bool) {
+	disk, _, ok := diskAndPartition(dataDev)
+	return disk, ok
+}

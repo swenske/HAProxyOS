@@ -15,7 +15,8 @@ GEN_DIR := gen
 	daemon-static initramfs-full qemu-network-test rootfs-build \
 	qemu-verity-boot-test state-image qemu-state-persist-test \
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
-	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test
+	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
+	qemu-lifecycle-upgrade-test
 
 all: build
 
@@ -151,13 +152,15 @@ qemu-verity-boot-test: kernel-build rootfs-build
 	./hack/qemu-verity-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
 
 # Phase 3 cont'd: builds a blank, pre-formatted ext4 image for the
-# persistent STATE partition (currently just /etc/haproxyos/pki - the
-# one thing rootfs/init/main.go's ephemeral tmpfs overlay can't be
-# allowed to wipe every boot) - formatted here, at build time, not on
-# the target (see rootfs/state-image.sh for why). Requires mkfs.ext4
-# (e2fsprogs) - doesn't need root. Small: PKI is a handful of small PEM
-# files.
-STATE_IMAGE_MB := 16
+# persistent STATE partition (/etc/haproxyos/pki, /etc/haproxy, and -
+# until real OCI/HTTPS image distribution exists - a staging area for
+# LifecycleService.Upgrade's release bundles too, see image/disk/
+# assemble.sh's own STATE_MB comment for why) - formatted here, at
+# build time, not on the target (see rootfs/state-image.sh for why).
+# Requires mkfs.ext4 (e2fsprogs) - doesn't need root. Must match
+# image/disk/assemble.sh's own STATE_MB, or <state-image> won't
+# actually fill the partition it gets dd'd into.
+STATE_IMAGE_MB := 128
 state-image:
 	mkdir -p $(BUILD_DIR)/rootfs
 	./rootfs/state-image.sh $(BUILD_DIR)/rootfs/state.img $(STATE_IMAGE_MB)
@@ -233,6 +236,24 @@ qemu-lifecycle-rollback-test: build disk-image
 # every other UEFI boot test here.
 qemu-secureboot-test: kernel-build rootfs-build
 	./hack/qemu-secureboot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 3 cont'd: proves LifecycleService.Upgrade actually installs a
+# *genuinely new* rootfs onto the inactive slot over a real gRPC call -
+# builds a second, genuinely different rootfs (different squashfs,
+# different root hash) and release bundle (image/release/assemble.sh)
+# on the fly, boots the existing disk.img, calls `haproxyosctl
+# lifecycle upgrade` with the new bundle, and watches the guest
+# genuinely reboot itself into it - HTTP healthy again, STATE intact,
+# and the kernel's own cmdline confirming the new slot's partitions and
+# root hash (not which HTTP port answers - STATE's persisted config is
+# shared across both slots by design, see hack/
+# qemu-lifecycle-upgrade-test.sh's own header comment for the real bug
+# that assumption caught) - then checks Rollback afterward still
+# correctly brings back the untouched original slot. Requires
+# haproxyosctl built (see `build`). See
+# hack/qemu-lifecycle-upgrade-test.sh.
+qemu-lifecycle-upgrade-test: build disk-image
+	./hack/qemu-lifecycle-upgrade-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`

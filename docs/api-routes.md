@@ -66,8 +66,8 @@ are also technically non-mutating).
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
 | `Install` | server | ⬜ | First install to a target disk |
-| `Upgrade` | server | ⬜ | Write image to inactive A/B slot, switch + reboot, auto-rollback on failed health check |
-| `Rollback` | | ⬜ | Switch back to the other A/B slot |
+| `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health`/auto-rollback on a failed health check not implemented yet |
+| `Rollback` | | ✅ | Switch back to the other A/B slot, reboot |
 
 ## HAProxyService
 

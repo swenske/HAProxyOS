@@ -66,11 +66,22 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # - rootfs.squashfs (~8MiB today) and rootfs.verity (~72KiB today) just
 # need to fit inside them, with headroom for the rootfs to grow later
 # without needing a new partition table. ESP_MB (64) comfortably fits
-# one UKI (~4.5MiB today).
+# one UKI (~4.5MiB today). STATE_MB (128, must match rootfs/
+# state-image.sh's own size for <state-image> to actually fill it) is
+# bigger than PKI/config alone would ever need: until this project has
+# real OCI/HTTPS image distribution and a dedicated staging area,
+# LifecycleService.Upgrade's release bundle (image/release/
+# assemble.sh - squashfs+verity+two UKIs, together a few 10s of MiB)
+# has nowhere else already-writable and already-reachable from inside
+# a running node to land before installing - see hack/
+# qemu-lifecycle-upgrade-test.sh for exactly why (haproxyosctl and
+# haproxyosd don't share a filesystem across the QEMU host/guest
+# boundary the way CLAUDE.md's own "-ca/-cert/-key ... handy when ctl
+# and daemon share a filesystem" convenience assumes they normally do).
 ESP_MB=64
 DATA_MB=64
 HASH_MB=4
-STATE_MB=16
+STATE_MB=128
 
 size_of() { stat -c%s "$1"; }
 [ "$(size_of "$SQUASHFS")" -le $((DATA_MB * 1024 * 1024)) ] || { echo "rootfs.squashfs exceeds the ${DATA_MB}MiB BOOT-*-DATA partition size" >&2; exit 1; }

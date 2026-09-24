@@ -157,3 +157,74 @@ func TestOtherSlot(t *testing.T) {
 		t.Fatalf("OtherSlot(B) = %q, want A", got)
 	}
 }
+
+func TestSlotDataDevice(t *testing.T) {
+	cases := []struct {
+		slot   string
+		want   string
+		wantOK bool
+	}{
+		{slot: "A", want: "/dev/vda2", wantOK: true},
+		{slot: "B", want: "/dev/vda4", wantOK: true},
+		{slot: "C", wantOK: false},
+		{slot: "", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.slot, func(t *testing.T) {
+			got, ok := SlotDataDevice("/dev/vda", tc.slot)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("device = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSlotHashDevice(t *testing.T) {
+	cases := []struct {
+		slot   string
+		want   string
+		wantOK bool
+	}{
+		{slot: "A", want: "/dev/vda3", wantOK: true},
+		{slot: "B", want: "/dev/vda5", wantOK: true},
+		{slot: "C", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.slot, func(t *testing.T) {
+			got, ok := SlotHashDevice("/dev/vda", tc.slot)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("device = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDisk(t *testing.T) {
+	cases := []struct {
+		name    string
+		dataDev string
+		want    string
+		wantOK  bool
+	}{
+		{name: "slot A partition", dataDev: "/dev/vda2", want: "/dev/vda", wantOK: true},
+		{name: "whole-disk device", dataDev: "/dev/vda", wantOK: false},
+		{name: "empty", dataDev: "", wantOK: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := Disk(tc.dataDev)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (got %q)", ok, tc.wantOK, got)
+			}
+			if ok && got != tc.want {
+				t.Fatalf("disk = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

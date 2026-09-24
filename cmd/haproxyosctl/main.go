@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -110,6 +111,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
 	fmt.Fprintln(os.Stderr, "  lifecycle rollback         switch the ESP to the other A/B slot's staged UKI and reboot into it")
+	fmt.Fprintln(os.Stderr, "  lifecycle upgrade [-sha256 HEX] BUNDLE_DIR  write a release bundle (image/release/assemble.sh) to the inactive slot, switch, and reboot into it")
 }
 
 func ctx() (context.Context, context.CancelFunc) {
@@ -191,6 +193,45 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 			log.Fatalf("Rollback: %v", err)
 		}
 		fmt.Printf("Rolling back to slot %s, node is rebooting\n", resp.GetActiveSlot())
+
+	case "upgrade":
+		fs := flag.NewFlagSet("lifecycle upgrade", flag.ExitOnError)
+		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
+		_ = fs.Parse(args[1:])
+		if fs.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle upgrade [-sha256 HEX] BUNDLE_DIR")
+			os.Exit(2)
+		}
+		bundleDir := fs.Arg(0)
+		sum := *sha256Flag
+		if sum == "" {
+			if data, err := os.ReadFile(filepath.Join(bundleDir, "rootfs.squashfs.sha256")); err == nil {
+				sum = strings.TrimSpace(string(data))
+			}
+		}
+
+		// Longer than ctx()'s default 10s - Upgrade writes the new
+		// rootfs.squashfs/rootfs.verity to a partition device directly,
+		// still fast for this project's image sizes, but no reason to
+		// cut it close.
+		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		stream, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Upgrade(c, &haproxyosv1alpha1.UpgradeRequest{
+			Source: &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+		})
+		if err != nil {
+			log.Fatalf("Upgrade: %v", err)
+		}
+		for {
+			resp, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatalf("Upgrade: %v", err)
+			}
+			fmt.Printf("[%s %.0f%%] %s\n", resp.GetStage(), resp.GetProgress()*100, resp.GetMessage())
+		}
 
 	default:
 		fmt.Fprintf(os.Stderr, "haproxyosctl lifecycle: unknown subcommand %q\n", sub)
