@@ -522,7 +522,13 @@ jobs:
       # file itself immediately after (a trap, so it's gone even if a
       # step above it fails).
       - name: Build a real, production-signed release bundle (Phase 3 cont'd)
-        if: ${{ secrets.SECUREBOOT_SIGNING_KEY != '' }}
+        # The `secrets` context isn't allowed directly in a step's own
+        # `if:` (the workflow fails to parse at all otherwise -
+        # confirmed the hard way via a real `workflow_dispatch` call
+        # rejected with "Unrecognized named-value: 'secrets'", not
+        # assumed from docs) - env: on this same step *is* visible to
+        # its own if:, so the secret is routed through env first.
+        if: ${{ env.SECUREBOOT_SIGNING_KEY != '' }}
         env:
           SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
         run: |
