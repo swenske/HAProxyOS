@@ -7,12 +7,16 @@ package api
 import (
 	"context"
 	"crypto/x509"
+	"os"
+	"runtime"
+	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
+	"github.com/swenske/HAProxyOS/internal/bootslot"
 	"github.com/swenske/HAProxyOS/internal/pki"
 )
 
@@ -36,7 +40,46 @@ type System struct {
 }
 
 func (s *System) Version(_ context.Context, _ *emptypb.Empty) (*haproxyosv1alpha1.VersionResponse, error) {
-	return &haproxyosv1alpha1.VersionResponse{Version: s.BuildVersion}, nil
+	return &haproxyosv1alpha1.VersionResponse{
+		Version:       s.BuildVersion,
+		GoVersion:     runtime.Version(),
+		KernelVersion: readKernelVersion(),
+		ActiveSlot:    currentActiveSlot(),
+	}, nil
+}
+
+// readKernelVersion reads /proc/sys/kernel/osrelease (e.g. "6.18.53") -
+// the same value `uname -r` reports, simpler to read than parsing
+// /proc/version's full free-form string. Empty on any read error - this
+// field is informational, never worth failing Version over.
+func readKernelVersion() string {
+	data, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// currentActiveSlot best-effort resolves which A/B slot this boot came
+// from, the same way internal/api/lifecycle.go's resolveBootContext
+// does - but never errors: an initramfs-only test boot, or any other
+// non-A/B boot, legitimately has no slot to report, and that's not a
+// reason to fail Version (unlike Rollback, which genuinely can't
+// proceed without one).
+func currentActiveSlot() string {
+	cmdline, err := os.ReadFile("/proc/cmdline")
+	if err != nil {
+		return ""
+	}
+	dataDev, ok := bootslot.DataDevice(string(cmdline))
+	if !ok {
+		return ""
+	}
+	slot, ok := bootslot.ActiveSlot(dataDev)
+	if !ok {
+		return ""
+	}
+	return slot
 }
 
 func (s *System) GenerateClientConfiguration(_ context.Context, req *haproxyosv1alpha1.GenerateClientConfigurationRequest) (*haproxyosv1alpha1.GenerateClientConfigurationResponse, error) {

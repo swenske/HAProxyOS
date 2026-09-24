@@ -31,7 +31,7 @@ are also technically non-mutating).
 
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
-| `Version` | | ✅ | Daemon version - connectivity check |
+| `Version` | | ✅ | Daemon version, Go version, kernel version, active A/B slot - connectivity check |
 | `Hostname` | | ⬜ | |
 | `Reboot` | | ⬜ | Power-cycle the machine |
 | `Shutdown` | | ⬜ | |
@@ -43,10 +43,10 @@ are also technically non-mutating).
 | `Logs` | server | ⬜ | Managed-service logs |
 | `Stats` | | ⬜ | Per-process CPU/memory |
 | `SystemStat` | | ⬜ | Boot time, context switches |
-| `Memory` | | ⬜ | |
-| `CPUInfo` | | ⬜ | |
-| `LoadAvg` | | ⬜ | |
-| `DiskStats` | | ⬜ | |
+| `Memory` | | ✅ | `/proc/meminfo` |
+| `CPUInfo` | | ✅ | `/proc/cpuinfo` |
+| `LoadAvg` | | ✅ | `/proc/loadavg` |
+| `DiskStats` | | ✅ | `/proc/diskstats` |
 | `DiskUsage` | server | ⬜ | |
 | `NetworkDeviceStats` | | ⬜ | |
 | `Netstat` | | ⬜ | |

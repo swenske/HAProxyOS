@@ -53,6 +53,8 @@ func main() {
 	switch cmd := flag.Arg(0); cmd {
 	case "version":
 		runVersion(conn)
+	case "system":
+		runSystem(conn, flag.Args()[1:])
 	case "haproxy":
 		runHAProxy(conn, flag.Args()[1:])
 	case "pki":
@@ -96,6 +98,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: haproxyosctl [-endpoint host:port] <command>")
 	fmt.Fprintln(os.Stderr, "commands:")
 	fmt.Fprintln(os.Stderr, "  version                    print haproxyosctl's own version and the connected node's version")
+	fmt.Fprintln(os.Stderr, "  system info                print version/kernel/active slot + memory/CPU/load/disk stats (the dashboard's own single-node fetch)")
 	fmt.Fprintln(os.Stderr, "  haproxy show-info          HAProxy version/uptime/connections (stats socket)")
 	fmt.Fprintln(os.Stderr, "  haproxy stats              raw 'show stat' CSV from the stats socket")
 	fmt.Fprintln(os.Stderr, "  haproxy get-config         print the currently active haproxy.cfg")
@@ -130,6 +133,67 @@ func runVersion(conn *grpc.ClientConn) {
 		log.Fatalf("Version: %v", err)
 	}
 	fmt.Println("Node:", resp.GetVersion())
+}
+
+// runSystem is the dashboard's own planned single-node fetch, bundled
+// into one CLI command for now - see docs/architecture.md's dashboard
+// design (Point 2 in the rebranding plan): one HTTP request per node
+// view will call the same set of RPCs this prints.
+func runSystem(conn *grpc.ClientConn, args []string) {
+	if len(args) == 0 || args[0] != "info" {
+		usage()
+		os.Exit(2)
+	}
+	client := haproxyosv1alpha1.NewSystemServiceClient(conn)
+
+	c, cancel := ctx()
+	defer cancel()
+	ver, err := client.Version(c, &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("Version: %v", err)
+	}
+	fmt.Printf("version: %s\n", ver.GetVersion())
+	fmt.Printf("go version: %s\n", ver.GetGoVersion())
+	fmt.Printf("kernel version: %s\n", ver.GetKernelVersion())
+	fmt.Printf("active slot: %s\n", ver.GetActiveSlot())
+
+	c, cancel = ctx()
+	defer cancel()
+	mem, err := client.Memory(c, &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("Memory: %v", err)
+	}
+	fmt.Printf("memory: total=%d available=%d cached=%d bytes\n", mem.GetTotalBytes(), mem.GetAvailableBytes(), mem.GetCachedBytes())
+
+	c, cancel = ctx()
+	defer cancel()
+	cpu, err := client.CPUInfo(c, &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("CPUInfo: %v", err)
+	}
+	fmt.Printf("cpus: %d\n", len(cpu.GetCpus()))
+	for _, info := range cpu.GetCpus() {
+		fmt.Printf("  cpu%d: %s (%.0f MHz)\n", info.GetProcessor(), info.GetModelName(), info.GetMhz())
+	}
+
+	c, cancel = ctx()
+	defer cancel()
+	load, err := client.LoadAvg(c, &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("LoadAvg: %v", err)
+	}
+	fmt.Printf("load average: %.2f %.2f %.2f\n", load.GetLoad1(), load.GetLoad5(), load.GetLoad15())
+
+	c, cancel = ctx()
+	defer cancel()
+	disks, err := client.DiskStats(c, &emptypb.Empty{})
+	if err != nil {
+		log.Fatalf("DiskStats: %v", err)
+	}
+	fmt.Printf("disks: %d\n", len(disks.GetDisks()))
+	for _, d := range disks.GetDisks() {
+		fmt.Printf("  %s: reads=%d writes=%d\n", d.GetDeviceName(), d.GetReadCompleted(), d.GetWriteCompleted())
+	}
 }
 
 func runPKI(conn *grpc.ClientConn, args []string) {

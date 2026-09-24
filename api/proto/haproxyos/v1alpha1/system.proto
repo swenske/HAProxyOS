@@ -86,6 +86,9 @@ message VersionResponse {
   string build_date = 3;
   string go_version = 4;
   string kernel_version = 5;
+  // "A" or "B" - empty if this boot isn't from a recognized A/B slot
+  // (e.g. an initramfs-only test boot, see internal/bootslot).
+  string active_slot = 6;
 }
 
 message HostnameResponse {

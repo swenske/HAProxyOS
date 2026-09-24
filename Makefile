@@ -18,7 +18,7 @@ GEN_DIR := gen
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
 	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test \
-	proxmox-image
+	proxmox-image qemu-system-info-test
 
 all: build
 
@@ -262,6 +262,14 @@ qemu-uefi-ab-boot-test: disk-image
 # haproxyosctl built (see `build`).
 qemu-lifecycle-rollback-test: build disk-image
 	./hack/qemu-lifecycle-rollback-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
+
+# Dashboard prep, tranche 1: proves the SystemService RPCs the dashboard's
+# single-node view needs (Memory/CPUInfo/LoadAvg/DiskStats, plus
+# VersionResponse's active_slot/kernel_version/go_version) return real,
+# sane values from a real boot - see internal/api/system_stats.go and
+# hack/qemu-system-info-test.sh.
+qemu-system-info-test: build disk-image
+	./hack/qemu-system-info-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
 
 # Phase 3 cont'd: proves Secure Boot signing/enforcement actually works,
 # both directions - a UKI signed with a throwaway test key (image/

@@ -388,12 +388,21 @@ jobs:
       # appears exactly once (STATE survived a real, API-driven reboot).
       # mTLS credentials for the test's own haproxyosctl call are
       # extracted straight from disk.img's STATE partition via debugfs
-      # (not the console - haproxyosd only ever prints the admin cert/
-      # key there once, on first boot, and never the CA cert at all, by
-      # design - see cmd/haproxyosd/main.go). See
-      # hack/qemu-lifecycle-rollback-test.sh.
+      # (not the console - haproxyosd does print all three, CA cert
+      # included, once on first boot, but a script can't watch a live
+      # console the way a real operator would - see
+      # cmd/haproxyosd/main.go). See hack/qemu-lifecycle-rollback-test.sh.
       - name: LifecycleService.Rollback reboots into the other slot for real (Phase 3 cont'd)
         run: make qemu-lifecycle-rollback-test
+
+      # Dashboard prep, tranche 1: proves Memory/CPUInfo/LoadAvg/DiskStats
+      # and Version's new active_slot/kernel_version/go_version fields
+      # return real, sane values from a real boot (not a mock) - the
+      # exact set of RPCs the planned management dashboard's single-node
+      # view will call. See internal/api/system_stats.go and
+      # hack/qemu-system-info-test.sh.
+      - name: SystemService stats RPCs return real values from a real boot (dashboard prep)
+        run: make qemu-system-info-test
 
       # Phase 3 cont'd: Secure Boot signing/enforcement is real, proven
       # both directions - a UKI signed with a throwaway test key

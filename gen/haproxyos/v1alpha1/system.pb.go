@@ -127,6 +127,9 @@ type VersionResponse struct {
 	BuildDate     string                 `protobuf:"bytes,3,opt,name=build_date,json=buildDate,proto3" json:"build_date,omitempty"`
 	GoVersion     string                 `protobuf:"bytes,4,opt,name=go_version,json=goVersion,proto3" json:"go_version,omitempty"`
 	KernelVersion string                 `protobuf:"bytes,5,opt,name=kernel_version,json=kernelVersion,proto3" json:"kernel_version,omitempty"`
+	// "A" or "B" - empty if this boot isn't from a recognized A/B slot
+	// (e.g. an initramfs-only test boot, see internal/bootslot).
+	ActiveSlot    string `protobuf:"bytes,6,opt,name=active_slot,json=activeSlot,proto3" json:"active_slot,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -192,6 +195,13 @@ func (x *VersionResponse) GetGoVersion() string {
 func (x *VersionResponse) GetKernelVersion() string {
 	if x != nil {
 		return x.KernelVersion
+	}
+	return ""
+}
+
+func (x *VersionResponse) GetActiveSlot() string {
+	if x != nil {
+		return x.ActiveSlot
 	}
 	return ""
 }
@@ -2563,7 +2573,7 @@ var File_haproxyos_v1alpha1_system_proto protoreflect.FileDescriptor
 
 const file_haproxyos_v1alpha1_system_proto_rawDesc = "" +
 	"\n" +
-	"\x1fhaproxyos/v1alpha1/system.proto\x12\x12haproxyos.v1alpha1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fhaproxyos/v1alpha1/common.proto\"\xaf\x01\n" +
+	"\x1fhaproxyos/v1alpha1/system.proto\x12\x12haproxyos.v1alpha1\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fhaproxyos/v1alpha1/common.proto\"\xd0\x01\n" +
 	"\x0fVersionResponse\x12\x18\n" +
 	"\aversion\x18\x01 \x01(\tR\aversion\x12\x1d\n" +
 	"\n" +
@@ -2572,7 +2582,9 @@ const file_haproxyos_v1alpha1_system_proto_rawDesc = "" +
 	"build_date\x18\x03 \x01(\tR\tbuildDate\x12\x1d\n" +
 	"\n" +
 	"go_version\x18\x04 \x01(\tR\tgoVersion\x12%\n" +
-	"\x0ekernel_version\x18\x05 \x01(\tR\rkernelVersion\".\n" +
+	"\x0ekernel_version\x18\x05 \x01(\tR\rkernelVersion\x12\x1f\n" +
+	"\vactive_slot\x18\x06 \x01(\tR\n" +
+	"activeSlot\".\n" +
 	"\x10HostnameResponse\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\"C\n" +
 	"\rRebootRequest\x122\n" +
