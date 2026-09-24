@@ -5,7 +5,7 @@
 # PATH - neither needs root privileges for this (only mounting/verifying
 # a *live* dm-verity device does).
 #
-# Usage: rootfs/assemble.sh <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>
+# Usage: rootfs/assemble.sh <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>
 #
 # Writes to <out-dir>:
 #   rootfs.squashfs   - the read-only root filesystem image
@@ -24,24 +24,45 @@ set -euo pipefail
 # `apt-get install cryptsetup-bin` having just run cleanly in the same job.
 export PATH="$PATH:/usr/sbin:/sbin"
 
-OUT_DIR="${1:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
-INIT_BIN="${2:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
-DAEMON_BIN="${3:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
-HAPROXY_BIN="${4:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
-HAPROXY_CFG="${5:?usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg>}"
+USAGE="usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>"
+OUT_DIR="${1:?$USAGE}"
+INIT_BIN="${2:?$USAGE}"
+DAEMON_BIN="${3:?$USAGE}"
+HAPROXY_BIN="${4:?$USAGE}"
+HAPROXY_CFG="${5:?$USAGE}"
+SELINUX_POLICY="${6:?$USAGE}"
 
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-mkdir -p "$WORKDIR"/{proc,sys,dev,run,var,tmp,sbin,usr/local/sbin,etc/haproxy}
+mkdir -p "$WORKDIR"/{proc,sys,dev,run,var,tmp,sbin,usr/local/sbin,etc/haproxy,etc/selinux}
 install -m 0755 "$INIT_BIN" "$WORKDIR/sbin/init"
 install -m 0755 "$DAEMON_BIN" "$WORKDIR/sbin/haproxyosd"
 install -m 0755 "$HAPROXY_BIN" "$WORKDIR/usr/local/sbin/haproxy"
 install -m 0644 "$HAPROXY_CFG" "$WORKDIR/etc/haproxy/haproxy.cfg"
+install -m 0644 "$SELINUX_POLICY" "$WORKDIR/etc/selinux/hapos.policy"
 # /run, /var, /tmp stay empty in the image itself; Phase 3's ephemeral
 # overlay (not implemented yet) is what makes them writable on a booted
 # node.
 
+# Phase 4 cont'd (SELinux): the only three files on this rootfs whose
+# type actually needs to be more specific than selinux/policy.conf's own
+# fs_use_xattr default (squashfs_t) - the three real executables, so
+# rootfs/init's own domain transitions (init_t -> haproxyosd_t ->
+# haproxy_t) have something to key off. Labeled via mksquashfs's own
+# pseudo-file `x` action (below), not a plain `setfattr` on the source
+# tree before mksquashfs runs, which turned out not to work at all here:
+# a real setfattr call on $WORKDIR (mktemp -d's default, tmpfs-backed
+# under WSL2) reports success and even reads back correctly with a
+# direct getfattr - but mksquashfs itself, run either as the build user
+# or as root, never picks the xattr up into the image regardless (traced
+# with an isolated single-file reproduction, `-xattrs-include` didn't
+# help either - mksquashfs's own directory-tree xattr scan just doesn't
+# see it). The pseudo-file mechanism sidesteps that scan entirely, the
+# same reason /var/empty's own mode-0000 pseudo-entry below already
+# exists instead of a real chmod'd directory in $WORKDIR: mksquashfs
+# sets the attribute directly while writing the image, rather than
+# reading it back off a real inode first.
 mkdir -p "$OUT_DIR"
 # -all-root: every file/dir owned by uid=gid=0 regardless of who's
 # running this script - there's no /etc/passwd on the target to resolve
@@ -60,7 +81,10 @@ mkdir -p "$OUT_DIR"
 # root-mode issue above: it silently vanished from the built image,
 # `mksquashfs` only warned "Could not open ... skipping").
 mksquashfs "$WORKDIR" "$OUT_DIR/rootfs.squashfs" -noappend -comp xz -all-root -root-mode 0755 \
-  -p "var/empty D 0 0000 0 0"
+  -p "var/empty D 0 0000 0 0" \
+  -p "sbin/init x security.selinux=system_u:object_r:init_exec_t" \
+  -p "sbin/haproxyosd x security.selinux=system_u:object_r:haproxyosd_exec_t" \
+  -p "usr/local/sbin/haproxy x security.selinux=system_u:object_r:haproxy_exec_t"
 
 veritysetup format "$OUT_DIR/rootfs.squashfs" "$OUT_DIR/rootfs.verity" > "$OUT_DIR/rootfs.verity.info"
 grep "^Root hash:" "$OUT_DIR/rootfs.verity.info" | awk '{print $3}' > "$OUT_DIR/rootfs.roothash"

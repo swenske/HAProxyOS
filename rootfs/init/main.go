@@ -315,9 +315,56 @@ func hardenSysctls() {
 	}
 }
 
+// selinuxPolicyPath is where rootfs/assemble.sh bundles the binary
+// policy selinux/classes.conf + selinux/policy.conf compile into (see
+// the Makefile's selinux-policy target) - a fixed path on the
+// squashfs-backed rootfs, not something init discovers dynamically.
+const selinuxPolicyPath = "/etc/selinux/hapos.policy"
+
+// loadSELinuxPolicy mounts selinuxfs and writes the compiled binary
+// policy straight to /sys/fs/selinux/load - the entire "loading" story
+// on a rootfs with no libselinux/load_policy/policy-store userspace at
+// all. Must run after mount("sysfs", ...) (selinuxfs lives under /sys)
+// but before mountEphemeral overmounts /etc with an empty tmpfs -
+// selinuxPolicyPath needs to still be readable off the original
+// squashfs-backed /etc at this point, not the fresh empty one.
+//
+// Missing entirely (an initramfs-only boot - qemu-boot-test/
+// qemu-network-test/qemu-hardening-test package no rootfs/assemble.sh
+// squashfs at all, so there's no policy file to find) is non-fatal, the
+// same tolerant pattern mount() and mountState() already use for a
+// missing STATE drive: log and move on. The kernel stays functionally
+// as if SELinux were absent (kernel/configs/haproxyos_defconfig's own
+// SECURITY_SELINUX_DEVELOP=y keeps it permissive with no policy loaded
+// regardless), so those tests' own boots are unaffected either way.
+//
+// Loading itself never fails on a first load specifically because none
+// has happened yet this boot - the kernel's own selinux_disabled bypass
+// unconditionally allows the very first security_load_policy() call
+// before any policy exists to check permissions against - so this
+// either succeeds or the policy file itself is malformed (a real bug in
+// how selinux/policy.conf was authored or compiled, not a permission
+// problem), logged either way for the same external-verifiability
+// reason hardenSysctls logs each write.
+func loadSELinuxPolicy() {
+	mount("selinuxfs", "/sys/fs/selinux", "selinuxfs")
+
+	policy, err := os.ReadFile(selinuxPolicyPath)
+	if err != nil {
+		fmt.Printf("init: selinux: no policy at %s: %v\n", selinuxPolicyPath, err)
+		return
+	}
+	if err := os.WriteFile("/sys/fs/selinux/load", policy, 0); err != nil {
+		fmt.Printf("init: selinux: load policy: %v\n", err)
+		return
+	}
+	fmt.Printf("init: selinux: loaded policy from %s (%d bytes)\n", selinuxPolicyPath, len(policy))
+}
+
 func main() {
 	mount("proc", "/proc", "proc")
 	mount("sysfs", "/sys", "sysfs")
+	loadSELinuxPolicy()
 	mount("devtmpfs", "/dev", "devtmpfs")
 	hardenSysctls()
 	mountEphemeral()

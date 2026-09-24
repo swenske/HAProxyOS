@@ -287,6 +287,20 @@ jobs:
       - name: Rootfs dm-verity kernel boot test (Phase 3 cont'd)
         run: make qemu-verity-boot-test
 
+      # Phase 4 cont'd: proves the real, hand-written SELinux policy
+      # (selinux/classes.conf + selinux/policy.conf, compiled by
+      # checkpolicy and loaded at boot by rootfs/init's
+      # loadSELinuxPolicy) mediates a full boot to a working HTTP 200
+      # with zero AVC denials - both permissively (the shipped default)
+      # and with a real enforcing=1 boot, the actual proof the rule set
+      # is complete rather than merely quiet. See
+      # hack/qemu-selinux-test.sh and selinux/policy.conf's own header
+      # for the real gaps (missing self:fd use, missing
+      # filesystem:associate, missing process transition perms, missing
+      # peer/packet network rules) five rounds of real boots found.
+      - name: SELinux policy mediates a real boot cleanly, permissive and enforcing (Phase 4 cont'd)
+        run: make qemu-selinux-test
+
       # Phase 3 cont'd: proves rootfs/state-image.sh's persistent STATE
       # partition survives a reboot, not just that it mounts - three
       # boots against the SAME state.img: haproxyosd's "first boot" log

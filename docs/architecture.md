@@ -878,15 +878,110 @@ plan - not implemented yet.
   lsm=capability,yama,selinux` and `SELinux:  Initializing.`, and
   `make qemu-network-test`/`qemu-hardening-test`/`qemu-verity-boot-
   test`/`qemu-state-persist-test` all still pass unchanged - the new
-  LSM, with no policy loaded, is currently a true no-op. Still open,
-  and the actual substance of SELinux support: a real minimal policy
-  (hand-written for this project's own two real binaries, not an
-  adapted refpolicy - refpolicy assumes a systemd/udev-shaped distro
-  this project structurally isn't), a way to compile it at build time
-  (`checkpolicy`/CIL tooling isn't in any build container yet), and a
-  boot-time loading mechanism in `rootfs/init` (no `libselinux`/
-  `load_policy` userspace here - would mean writing the compiled
-  binary policy straight to `/sys/fs/selinux/load` by hand).
+  LSM, with no policy loaded, is currently a true no-op.
+
+  SELinux, second slice: a real, hand-written minimal policy
+  (`selinux/classes.conf` + `selinux/policy.conf`), compiled by
+  `checkpolicy` (`selinux/Dockerfile`, `make selinux-policy`) and loaded
+  by `rootfs/init/main.go`'s `loadSELinuxPolicy` right after mounting
+  sysfs, writing the compiled bytes straight to `/sys/fs/selinux/load` -
+  no `libselinux`/`load_policy`/policy-store userspace at all, matching
+  the "no shell, no package manager" rule for the target. Not adapted
+  from refpolicy - refpolicy assumes a systemd/udev-shaped, package-
+  managed distro this project structurally isn't, and stripping it down
+  would cost more than writing three domains from scratch. The
+  bootstrap tool is `scripts/selinux/mdp/mdp`, a small program shipped
+  *in the kernel source tree itself*, purpose-built for exactly this
+  situation (a system with no existing distro policy to inherit
+  class/permission definitions from) - `selinux/classes.conf` is its
+  generated output (plain TE, no MLS - `mdp`'s `-m` flag enables MLS,
+  which this project doesn't need: a single sensitivity level with real
+  type-enforcement rules is enough, and skips ~2000 lines of per-class
+  `mlsconstrain` boilerplate MLS would otherwise require).
+
+  Three real domains for the three real processes this rootfs ever
+  runs: `init_t` (PID 1, broadly privileged by necessity - mounts every
+  filesystem, loads this very policy, is the last-resort revert path),
+  `haproxyosd_t` (also root, moderately broad), and `haproxy_t` - the
+  one domain confinement effort actually went into, since it's the only
+  one that ever parses untrusted, internet-facing input: no
+  `self:capability` wildcard, only the specific capabilities its own
+  chroot/privilege-drop sequence needs. Labeling is xattr-based in
+  principle (`fs_use_xattr` for both real filesystems, matching what
+  `mdp` itself generates as correct for xattr-capable filesystems - both
+  now carry `CONFIG_SQUASHFS_XATTR`/`CONFIG_EXT4_FS_SECURITY` from the
+  first SELinux slice) but only the three real executables ever get an
+  explicit xattr - `fs_use_xattr`'s own fallback (an inode with no
+  `security.selinux` xattr gets the statement's own default context)
+  means everything else on either filesystem just falls through to
+  `squashfs_t`/`state_t`, no whole-rootfs labeling pass needed. The ESP
+  (FAT, can't carry xattrs at all) is `genfscon`-labeled wholesale
+  instead.
+
+  Two real, non-obvious build-tooling gaps, both found by a real build
+  failing, not by reading documentation: (1) Debian trixie's
+  `checkpolicy` (3.8.1) links a `libsepol` that doesn't recognize five
+  `policycap` names this kernel's own `mdp` output includes
+  (`genfs_seclabel_symlinks`, `ioctl_skip_cloexec`, `netif_wildcard`,
+  `genfs_seclabel_wildcard`, `functionfs_seclabel`) - real kernel/
+  toolchain version skew, fixed by dropping those five (all optional
+  kernel-side conveniences, never required for enforcement) rather than
+  chasing a newer `checkpolicy`; (2) labeling the three executables by
+  `setfattr`-ing `$WORKDIR` before `mksquashfs` runs - the obvious first
+  approach - silently produced an *unlabeled* image every time: a real
+  `setfattr` on the security namespace reports success and even reads
+  back correctly with a direct `getfattr`, but `mksquashfs` itself,
+  run as build user or root, never picks the xattr up into the built
+  image at all (confirmed with an isolated single-file reproduction).
+  Fixed by using `mksquashfs`'s own pseudo-file `x` action
+  (`-p "path x security.selinux=<context>"`) instead - the same
+  mechanism `/var/empty`'s mode-0000 entry already used to sidestep an
+  analogous "can't read this back off a real inode" gap - which sets
+  the attribute directly while writing the image rather than reading it
+  off a source-tree inode first.
+
+  The actual allow-rule set was never going to be right by construction
+  - it was arrived at the same way every other piece of this project
+  has been, by booting for real (permissive mode - the kernel's own
+  `SECURITY_SELINUX_DEVELOP=y` default) and reading real `avc: denied`
+  lines out of dmesg, fixing exactly what each one named, and
+  reboot-and-recheck, five rounds deep before reaching a genuinely
+  clean, zero-denial boot with real HTTP 200 traffic flowing. None of
+  what turned up is guessable from reading a rule set in the abstract:
+  `self:fd use` (a domain needs explicit permission to use its *own*
+  already-open file descriptors, including ones inherited across an
+  exec transition from a *different* domain -
+  `allow haproxy_t init_t:fd use;`, since haproxy's console fd was
+  opened two domain-hops earlier by `init_t` and never reopened);
+  `filesystem:associate` on every single `fs_use`-labeled type against
+  *itself* (not implicit just because source and target match - the
+  very first `tmpfs` mount failed on exactly this); the process-
+  transition permissions `noatsecure`/`rlimitinh`/`siginh`, needed on
+  every `init_t -> haproxyosd_t -> haproxy_t` hop; and, once real
+  network traffic started flowing, `peer`/`packet`/`netif`/`node` class
+  rules for `policycap always_check_network` - inbound packets with no
+  netlabel/secmark policy configured (this project has none) get the
+  "unlabeled" initial SID's context on *every single packet*, checked
+  against the receiving netif/node's own type, not just once at
+  bind/connect time. `hack/qemu-selinux-test.sh` (`make
+  qemu-selinux-test`) is what keeps re-proving this: two boots of the
+  identical image, the shipped permissive default and a real
+  `enforcing=1` override, both must show the policy loading, real HTTP
+  200, and grep clean for `avc:.*denied` - a permissive-mode denial
+  doesn't block anything, so only the second boot actually proves the
+  rule set complete rather than merely quiet. Both did, on the first
+  `enforcing=1` boot tried, once the permissive rounds above reached
+  zero denials.
+
+  SELinux stays permissive by *default* in the shipped kernel config
+  (`SECURITY_SELINUX_DEVELOP=y`, no `enforcing=1` baked into any UKI's
+  cmdline yet) even though this slice proves enforcing already works
+  cleanly end to end - flipping the shipped default is a separate,
+  deliberate decision this slice doesn't make on its own: it raises the
+  stakes of any *future* change (a new file, a new syscall a binary
+  starts making) tripping an uncovered denial and actually breaking a
+  boot, rather than just logging one, and deserves its own explicit
+  go-ahead rather than riding in on this slice.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
   (separate container from the runner) + remote kernel-menuconfig UI -

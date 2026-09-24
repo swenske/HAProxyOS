@@ -17,7 +17,7 @@ GEN_DIR := gen
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
 	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
-	lifecycle-install-test qemu-hardening-test
+	lifecycle-install-test qemu-hardening-test selinux-policy qemu-selinux-test
 
 all: build
 
@@ -145,10 +145,20 @@ qemu-hardening-test: kernel-build initramfs-full
 # the build-side half of Phase 3's immutability story, verified by
 # mounting + `veritysetup verify` - see qemu-verity-boot-test for the
 # kernel actually booting from it.
-rootfs-build: init daemon-static haproxy-build
+# Phase 4 cont'd: compiles selinux/classes.conf + selinux/policy.conf
+# (see both files' own headers) into the one binary policy
+# rootfs/init loads at boot - checkpolicy only, no libselinux/semodule/
+# policy store on the target. Requires Docker (same pattern as every
+# other pkgs/-style component here).
+selinux-policy:
+	mkdir -p $(BUILD_DIR)/selinux
+	docker build --target export -o $(BUILD_DIR)/selinux selinux
+
+rootfs-build: init daemon-static haproxy-build selinux-policy
 	mkdir -p $(BUILD_DIR)/rootfs
 	./rootfs/assemble.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/init $(BUILD_DIR)/haproxyosd \
-		$(BUILD_DIR)/haproxy rootfs/base/etc/haproxy/haproxy.cfg
+		$(BUILD_DIR)/haproxy rootfs/base/etc/haproxy/haproxy.cfg \
+		$(BUILD_DIR)/selinux/hapos.policy
 
 # Phase 3 cont'd: boots the kernel directly from rootfs-build's
 # squashfs+dm-verity image via the "dm-mod.create=" cmdline parameter
@@ -162,6 +172,15 @@ rootfs-build: init daemon-static haproxy-build
 # table's fields are derived from rootfs.verity.info.
 qemu-verity-boot-test: kernel-build rootfs-build
 	./hack/qemu-verity-boot-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
+
+# Phase 4 cont'd: proves selinux/classes.conf + selinux/policy.conf (the
+# real, hand-written minimal policy - see that file's own header) loads
+# at boot and mediates a full, working HTTP-200 boot with zero AVC
+# denials, both permissively (the shipped default) and with a real
+# enforcing=1 boot - the actual proof the rule set is complete, not
+# merely quiet. See hack/qemu-selinux-test.sh.
+qemu-selinux-test: kernel-build rootfs-build
+	./hack/qemu-selinux-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
 
 # Phase 3 cont'd: builds a blank, pre-formatted ext4 image for the
 # persistent STATE partition (/etc/haproxyos/pki, /etc/haproxy, and -
