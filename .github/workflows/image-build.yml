@@ -501,10 +501,41 @@ jobs:
       - name: LifecycleService.Install partitions a blank disk from scratch for real (Phase 3 cont'd)
         run: make lifecycle-install-test
 
+      # Phase 3 cont'd: real Secure Boot key management - no HSM in this
+      # project's threat model (single maintainer, self-hosted CI), so
+      # the simplest thing that's still meaningfully safer than
+      # committing a key to git: the private key lives only as a GitHub
+      # Actions encrypted secret (SECUREBOOT_SIGNING_KEY), generated
+      # once, offline, by image/secureboot/gen-production-key.sh - never
+      # by CI itself, unlike gen-test-key.sh's deliberately-fresh-every-
+      # run throwaway key. The matching certificate isn't sensitive (it
+      # has to be enrolled into every node's firmware db anyway) and is
+      # committed straight into the repo at image/secureboot/
+      # production-cert.pem. This step only runs when the secret exists
+      # (skipped entirely on a fork PR or before the one-time key
+      # ceremony happens) - decodes it to a step-scoped temp file,
+      # signs both slots' UKIs with it via image/release/assemble.sh's
+      # existing optional signing-key/signing-cert args (no new signing
+      # code needed - Upgrade's own release-bundle tooling already takes
+      # them), independently verifies the signatures with sbverify
+      # against the committed certificate, and removes the temp key
+      # file itself immediately after (a trap, so it's gone even if a
+      # step above it fails).
+      - name: Build a real, production-signed release bundle (Phase 3 cont'd)
+        if: ${{ secrets.SECUREBOOT_SIGNING_KEY != '' }}
+        env:
+          SECUREBOOT_SIGNING_KEY: ${{ secrets.SECUREBOOT_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          KEY="$(mktemp)"
+          trap 'rm -f "$KEY"' EXIT
+          printf '%s' "$SECUREBOOT_SIGNING_KEY" > "$KEY"
+          ./image/release/assemble.sh build/release-signed build/bzImage build/rootfs "$KEY" image/secureboot/production-cert.pem
+          sbverify --cert image/secureboot/production-cert.pem build/release-signed/uki-a.efi
+          sbverify --cert image/secureboot/production-cert.pem build/release-signed/uki-b.efi
+          echo "Both slots' UKIs are validly signed with the production key and verify against image/secureboot/production-cert.pem"
+
       # TODO(Phase 3 cont'd): image/iso, image/kvm-proxmox, image/vmware,
-      # a real signing key for Secure Boot (image/secureboot/
-      # gen-test-key.sh is explicitly a throwaway test key, not a
-      # production one - real key management is a separate, unaddressed
-      # concern), upload artifacts to a GitHub Release.
+      # upload artifacts to a GitHub Release.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
       # only into images that opt in via declarative configuration.

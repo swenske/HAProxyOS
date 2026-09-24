@@ -7,10 +7,11 @@
 # This is explicitly a TEST/DEV key, generated fresh, never committed:
 # it exists to prove the Secure Boot signing *mechanism* works
 # end to end (hack/qemu-secureboot-test.sh), not to be a real
-# project release key. A real deployment's actual signing key needs
-# real key management (HSM, CI secret, offline root of trust, ...) -
-# that's a distinct, unaddressed concern, not something a build script
-# should ever generate on the fly.
+# project release key - that's image/secureboot/gen-production-key.sh
+# (run once, offline, by a human - never by a build script on the fly)
+# plus image-build.yml's own "production-signed release bundle" step,
+# which reads the resulting private key from a GitHub Actions encrypted
+# secret rather than ever committing it.
 #
 # Usage: image/secureboot/gen-test-key.sh <out-dir>
 # Writes <out-dir>/{key.pem,cert.pem}.

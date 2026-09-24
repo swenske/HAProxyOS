@@ -770,9 +770,29 @@ plan - not implemented yet.
   the native process - confirms `Install` against `/dev/vda` (the disk
   it's actually booted from) is refused too. A bonus `Rollback` call
   proves slot B's identical copy is genuinely valid, not just slot A's.
-  Still open: a real production signing key (the test key used
-  throughout this project's Secure Boot work is exactly that - a test
-  key) is the one separate, unbuilt piece left in Phase 3.
+  A real production signing key now exists too, closing out Phase 3:
+  no HSM in this project's threat model (single maintainer, self-hosted
+  CI), so the simplest thing genuinely safer than committing a key to
+  git is what's used - `image/secureboot/gen-production-key.sh`
+  generates it once, offline, by a human (20-year validity, unlike
+  `gen-test-key.sh`'s 10 - rotating it means re-enrolling every already-
+  deployed node's firmware by hand, so it's deliberately long-lived
+  rather than something to renew casually); the private key lives only
+  as a GitHub Actions encrypted secret (`SECUREBOOT_SIGNING_KEY`), never
+  in the repo; the certificate half isn't sensitive (it has to be
+  enrolled into every node's firmware `db` anyway) and is committed
+  straight in at `image/secureboot/production-cert.pem`.
+  `image-build.yml`'s own "production-signed release bundle" step needed
+  no new signing code at all - `image/release/assemble.sh`'s existing
+  optional `[signing-key] [signing-cert]` args (already built for
+  `Upgrade`'s own release bundles) were enough, given a decoded,
+  step-scoped temp copy of the secret. Runs only when the secret exists
+  (skipped on a fork PR, or before the one-time key ceremony happens),
+  and independently verifies both slots' signed UKIs with `sbverify`
+  against the committed certificate before declaring success - proven
+  for real locally before ever touching CI: both UKIs signed with the
+  actual production key and `sbverify`-confirmed valid, using the exact
+  same command the workflow step now runs.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend
