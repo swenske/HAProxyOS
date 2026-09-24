@@ -110,6 +110,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE  upload a PEM cert+key bundle as NAME, optionally binding it into crt-list PATH")
 	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
+	fmt.Fprintln(os.Stderr, "  lifecycle install [-sha256 HEX] DISK BUNDLE_DIR  partition a blank DISK from scratch and write a release bundle (image/release/assemble.sh) to both A/B slots - does not reboot anything")
 	fmt.Fprintln(os.Stderr, "  lifecycle rollback         switch the ESP to the other A/B slot's staged UKI and reboot into it")
 	fmt.Fprintln(os.Stderr, "  lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR  write a release bundle (image/release/assemble.sh) to the inactive slot, switch, and reboot into it - with -wait-for-health, reverts and reboots back automatically if the new slot never stays up long enough to confirm healthy")
 }
@@ -185,6 +186,46 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 	}
 
 	switch sub := args[0]; sub {
+	case "install":
+		fs := flag.NewFlagSet("lifecycle install", flag.ExitOnError)
+		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
+		_ = fs.Parse(args[1:])
+		if fs.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle install [-sha256 HEX] DISK BUNDLE_DIR")
+			os.Exit(2)
+		}
+		disk, bundleDir := fs.Arg(0), fs.Arg(1)
+		sum := *sha256Flag
+		if sum == "" {
+			if data, err := os.ReadFile(filepath.Join(bundleDir, "rootfs.squashfs.sha256")); err == nil {
+				sum = strings.TrimSpace(string(data))
+			}
+		}
+
+		// Longer than Upgrade's own 60s - Install writes the full
+		// rootfs to *both* A/B slots plus builds the ESP and STATE
+		// filesystems from scratch, more work than Upgrade's single-
+		// slot raw writes.
+		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		stream, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Install(c, &haproxyosv1alpha1.InstallRequest{
+			Source: &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+			Disk:   disk,
+		})
+		if err != nil {
+			log.Fatalf("Install: %v", err)
+		}
+		for {
+			resp, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatalf("Install: %v", err)
+			}
+			fmt.Printf("[%s %.0f%%] %s\n", resp.GetStage(), resp.GetProgress()*100, resp.GetMessage())
+		}
+
 	case "rollback":
 		c, cancel := ctx()
 		defer cancel()

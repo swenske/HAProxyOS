@@ -16,7 +16,8 @@ GEN_DIR := gen
 	qemu-verity-boot-test state-image qemu-state-persist-test \
 	disk-image qemu-ab-boot-test uki-image qemu-uefi-boot-test \
 	qemu-uefi-ab-boot-test qemu-lifecycle-rollback-test qemu-secureboot-test \
-	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test
+	qemu-lifecycle-upgrade-test qemu-lifecycle-upgrade-health-test \
+	lifecycle-install-test
 
 all: build
 
@@ -266,6 +267,18 @@ qemu-lifecycle-upgrade-test: build disk-image
 # `build`).
 qemu-lifecycle-upgrade-health-test: build disk-image
 	./hack/qemu-lifecycle-upgrade-health-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
+
+# Phase 3 cont'd: proves LifecycleService.Install partitions a genuinely
+# blank disk from scratch (internal/diskimage + go-diskfs) and produces
+# a real, independently bootable image - haproxyosd runs *natively* on
+# the host for the Install call itself (no A/B/STATE machinery of its
+# own to need a VM for, same pattern image-build.yml's own "HAProxy
+# gRPC API integration test" step already uses), then the result is
+# booted under real OVMF to confirm it. Requires root (sudo) for
+# haproxy's chroot() and for the go-diskfs GPT/filesystem writes.
+# Requires haproxyosctl built (see `build`).
+lifecycle-install-test: build rootfs-build
+	./hack/lifecycle-install-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/bzImage $(BUILD_DIR)/haproxy $(BUILD_DIR)/haproxyosd $(BIN_DIR)/haproxyosctl
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`

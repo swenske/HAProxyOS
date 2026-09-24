@@ -703,13 +703,76 @@ plan - not implemented yet.
   the same real evidence `hack/qemu-uefi-ab-boot-test.sh` established:
   the kernel's own "Kernel command line:" log line, at specific boot
   numbers, referencing the expected slot's partitions and root hash.
-  Still open: `LifecycleService.Install` (bare-metal provisioning of a
-  fresh, unpartitioned disk - needs a Go-native GPT/FAT builder, since
-  `sgdisk`/`mtools`/`ukify` don't exist on the target OS any more than
-  they do at runtime for `Rollback`/`Upgrade`, and unlike those two,
-  `Install` has no existing partition table to build on), and a real
-  production signing key (the test key above is exactly that - a test
-  key) are still separate, unbuilt pieces.
+  `LifecycleService.Install` is now real too: unlike `Rollback`/
+  `Upgrade`, it has no existing partition table to build on, so it can't
+  get away with only ever moving pre-built bytes into place - it lays
+  out the *entire* disk itself, from a completely blank starting point.
+  `sgdisk`/`mtools`/`mkfs.ext4` don't exist on the target OS any more
+  than they do at runtime for `Rollback`/`Upgrade`, so this needed a
+  genuinely Go-native GPT/FAT32/ext4 writer - found in
+  `github.com/diskfs/go-diskfs` rather than hand-rolled: confirmed,
+  empirically, before writing any production code, by building a full
+  six-partition disk with it (GPT table, a real ext4 STATE filesystem,
+  a real FAT32 ESP with a real UKI written into it) and booting the
+  result under real OVMF - HTTP 200, PKI bootstrapped onto the
+  go-diskfs-created STATE filesystem, on the first try after fixing one
+  real thing that verification actually caught:
+  `gpt.Table.ProtectiveMBR` defaults to `false`, and leaving it unset
+  produces a GPT disk `sgdisk -p` reports as having a "corrupt MBR" (in
+  practice: no protective MBR at all, all zero bytes at LBA 0) - an easy
+  one-line fix (`ProtectiveMBR: true`) once caught, but exactly the kind
+  of gap a library's own example code doesn't warn about.
+  `internal/diskimage.Compute` is the pure-arithmetic half (given a
+  disk's total byte size, lay out ESP/BOOT-A-DATA/BOOT-A-HASH/
+  BOOT-B-DATA/BOOT-B-HASH sequentially and sector-aligned, matching
+  `image/disk/assemble.sh`'s own fixed sizes and convention exactly,
+  then give STATE whatever's left - unlike build time's fixed
+  `STATE_MB`, meant for a deliberately small QEMU test disk, a real
+  target disk's remaining space is put to use) - kept separate from
+  `internal/api/install.go`'s actual go-diskfs calls specifically so the
+  layout math has real unit tests without needing a disk or root to run
+  them, the same reasoning `internal/bootslot`'s pure cmdline parsing
+  was kept apart from the syscalls that act on what it parses.
+  `Install` reads both slots' UKIs from the same kind of release bundle
+  `Upgrade` already reads from (`image/release/assemble.sh`) - it never
+  builds one either, just picks pre-built bytes for both slots this
+  time instead of one. Both A/B slots get identical content on
+  purpose: there's no "other slot" yet to leave untouched, the same
+  starting point `image/disk/assemble.sh` itself produces at build
+  time. Refuses two disks outright: one that already has a partition
+  carrying one of HAProxyOS's own conventional GPT names (`ESP`,
+  `STATE`, ...) - "looks like an existing install, use Upgrade/Rollback
+  instead" - and the disk this node is itself currently booted from
+  (repartitioning that out from under a running system would be
+  catastrophic, and it's `Upgrade`'s territory anyway) - the latter
+  reuses `internal/bootslot.Disk` against `/proc/cmdline`, the same
+  parsing `Rollback`/`Upgrade` already trust. Doesn't reboot anything on
+  success: the disk it just wrote isn't necessarily the one this node
+  runs from at all (see the proto's own `disk` field comment), so
+  getting a machine to actually boot from it is the caller/operator's
+  job.
+  Proven with a real gRPC call, via `hack/lifecycle-install-test.sh` -
+  the one lifecycle test in this project where the RPC call itself
+  doesn't run inside a VM: `Install` has no A/B/STATE machinery of its
+  own to depend on (it's what *creates* that machinery), so `haproxyosd`
+  runs natively on the test host, the same pattern `image-build.yml`'s
+  own "HAProxy gRPC API integration test" step already uses, reading its
+  bootstrapped PKI creds straight off `-pki-dir` rather than scraping a
+  QEMU console log. Only the *result* is checked under a real VM - the
+  same standard every other "is this actually bootable" claim in this
+  project is held to. The test calls `Install` against a plain
+  pre-allocated file (go-diskfs works identically against a real block
+  device or a file, confirmed during the library verification above),
+  confirms a second `Install` against the now-installed file is refused,
+  boots the result under real OVMF and confirms real HTTP 200 plus a
+  fresh PKI bootstrap, then - from *inside* that now-running instance,
+  which has a genuine `dm-mod.create=` cmdline to check against, unlike
+  the native process - confirms `Install` against `/dev/vda` (the disk
+  it's actually booted from) is refused too. A bonus `Rollback` call
+  proves slot B's identical copy is genuinely valid, not just slot A's.
+  Still open: a real production signing key (the test key used
+  throughout this project's Secure Boot work is exactly that - a test
+  key) is the one separate, unbuilt piece left in Phase 3.
 - **Phase 4**: SELinux policy + full CIS hardening pass.
 - **Phase 5**: `NetworkService` - bird (BGP), keepalived (VRRP), nftables.
 - **Phase 6**: companion website + dedicated Proxmox-hosted backend

@@ -79,8 +79,10 @@ func (x *ImageSource) GetSha256() string {
 type InstallRequest struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Source *ImageSource           `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
-	// Target disk, e.g. "/dev/sda". Fails if the disk already has a
-	// HAProxyOS install (use Reset/Upgrade instead).
+	// Target disk, e.g. "/dev/sda" - not necessarily the disk this node
+	// itself booted from (rejected if it is; that's Upgrade's territory).
+	// Fails if the disk already has a HAProxyOS install (use
+	// Rollback/Upgrade instead).
 	Disk          string `protobuf:"bytes,2,opt,name=disk,proto3" json:"disk,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -131,10 +133,15 @@ func (x *InstallRequest) GetDisk() string {
 }
 
 type InstallResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stage         string                 `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"`         // e.g. "partitioning", "writing-image", "verifying"
-	Progress      float64                `protobuf:"fixed64,2,opt,name=progress,proto3" json:"progress,omitempty"` // 0.0-1.0 within the current stage
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// "verifying", "partitioning", "writing-data", "formatting-state",
+	// "writing-esp", "done". Install never reboots anything itself - the
+	// target disk isn't necessarily the one this node runs from - so
+	// "done" is this stream's own last message, not a handoff to a later
+	// boot the way Upgrade's "rebooting" is.
+	Stage         string  `protobuf:"bytes,1,opt,name=stage,proto3" json:"stage,omitempty"`
+	Progress      float64 `protobuf:"fixed64,2,opt,name=progress,proto3" json:"progress,omitempty"` // 0.0-1.0 within the current stage
+	Message       string  `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

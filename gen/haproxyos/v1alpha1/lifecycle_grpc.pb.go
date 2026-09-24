@@ -35,8 +35,12 @@ const (
 // healthy within its grace period. See docs/architecture.md for the A/B
 // partition layout this is built on (Phase 3).
 type LifecycleServiceClient interface {
-	// Install writes an image to disk for the first time (bare metal /
-	// fresh VM), streaming progress.
+	// Install writes an image to a blank disk for the first time (bare
+	// metal / fresh VM) - partitioning it from scratch and writing
+	// identical content to both A/B slots, since there's no "other slot"
+	// yet to leave untouched. Streams progress; never reboots anything,
+	// since the disk it just wrote isn't necessarily the one this node
+	// itself is running from.
 	Install(ctx context.Context, in *InstallRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[InstallResponse], error)
 	// Upgrade writes a new image to the currently-inactive A/B slot,
 	// switches the bootloader default, and reboots. If wait_for_health is
@@ -119,8 +123,12 @@ func (c *lifecycleServiceClient) Rollback(ctx context.Context, in *emptypb.Empty
 // healthy within its grace period. See docs/architecture.md for the A/B
 // partition layout this is built on (Phase 3).
 type LifecycleServiceServer interface {
-	// Install writes an image to disk for the first time (bare metal /
-	// fresh VM), streaming progress.
+	// Install writes an image to a blank disk for the first time (bare
+	// metal / fresh VM) - partitioning it from scratch and writing
+	// identical content to both A/B slots, since there's no "other slot"
+	// yet to leave untouched. Streams progress; never reboots anything,
+	// since the disk it just wrote isn't necessarily the one this node
+	// itself is running from.
 	Install(*InstallRequest, grpc.ServerStreamingServer[InstallResponse]) error
 	// Upgrade writes a new image to the currently-inactive A/B slot,
 	// switches the bootloader default, and reboots. If wait_for_health is

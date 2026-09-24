@@ -65,7 +65,7 @@ are also technically non-mutating).
 
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
-| `Install` | server | ⬜ | First install to a target disk |
+| `Install` | server | ✅ | Partition a blank target disk from scratch (GPT + ESP/FAT32 + STATE/ext4, pure Go via go-diskfs) and write a release bundle's rootfs identically to both A/B slots - doesn't reboot anything |
 | `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health` auto-reverts if the new slot's HAProxy (real stats-socket check) never comes up healthy in time, or if haproxyosd itself never stays running long enough to check |
 | `Rollback` | | ✅ | Switch back to the other A/B slot, reboot |
 

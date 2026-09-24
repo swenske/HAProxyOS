@@ -21,24 +21,23 @@ import (
 	"github.com/swenske/HAProxyOS/internal/espswitch"
 )
 
-// Lifecycle implements haproxyosv1alpha1.LifecycleServiceServer. Install
-// isn't implemented yet (bare-metal provisioning of a *fresh*, unpartitioned
-// disk needs a Go-native GPT/FAT builder - sgdisk/mtools/ukify don't exist
-// on the target OS any more than they do at runtime for Rollback/Upgrade
-// below, and unlike those two, Install has no existing partition table to
-// build on). Upgrade.wait_for_health isn't implemented yet either (needs a
-// persistent "boot pending confirmation" marker the *next* boot checks and
-// clears, plus an automatic revert if it never does - see docs/
-// architecture.md's Phase 3 notes) - see its own doc comment.
+// Lifecycle implements haproxyosv1alpha1.LifecycleServiceServer.
 //
-// Rollback and Upgrade share the same core trick: the running node can
-// never shell out to `ukify`/`sbsign` (no package manager, by design), so
-// both just move already-built UKIs into place instead of ever assembling
+// Rollback and Upgrade share a core trick: the running node can never
+// shell out to `ukify`/`sbsign` (no package manager, by design), so both
+// just move already-built UKIs into place instead of ever assembling
 // one. Rollback moves a UKI image/disk/activate-slot.sh already staged at
 // build/install time (\HAPROXYOS\UKI-A.EFI / UKI-B.EFI); Upgrade moves one
 // that arrived as part of a "release bundle" (image/release/assemble.sh) -
 // which exists specifically because a genuinely *new* rootfs has a root
 // hash nobody could have pre-staged at the original install's build time.
+// Install (install.go) is the one that can't get away with just moving
+// bytes into place throughout: it has no existing partition table to
+// build on, so it lays out the whole disk itself in pure Go
+// (internal/diskimage + github.com/diskfs/go-diskfs, since sgdisk/
+// mtools/mkfs.ext4 don't exist on the target OS either) - but even it
+// never builds a UKI, taking both slots' pre-built ones from the same
+// kind of release bundle Upgrade reads from.
 type Lifecycle struct {
 	haproxyosv1alpha1.UnimplementedLifecycleServiceServer
 }
