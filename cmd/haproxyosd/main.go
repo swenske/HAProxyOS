@@ -62,7 +62,7 @@ func main() {
 		hostname = "haproxyos"
 	}
 
-	pkiBootstrap, err := pki.LoadOrBootstrap(*pkiDir, hostname, nil)
+	pkiBootstrap, err := pki.LoadOrBootstrap(*pkiDir, hostname, localNetworkIPs())
 	if err != nil {
 		log.Fatalf("pki: %v", err)
 	}
@@ -163,6 +163,38 @@ const (
 	healthStableChecks   = 3
 	defaultHealthTimeout = 60 * time.Second // used if the marker's own HealthTimeoutSeconds is unset
 )
+
+// localNetworkIPs returns every non-loopback unicast IP address
+// currently assigned to a network interface - added as extra SANs on
+// the server certificate LoadOrBootstrap issues on first boot, so a
+// client dialing the node over its real, DHCP-assigned LAN address (not
+// just 127.0.0.1/hostname/localhost, the only SANs a bare
+// LoadOrBootstrap(dir, hostname, nil) call would carry) can actually
+// verify the handshake - found missing for real: a dashboard add-node
+// call to a real Proxmox-deployed node over its LAN IP failed
+// certificate verification ("certificate is valid for 127.0.0.1, not
+// <real IP>"), never caught by any QEMU test in this project since
+// every one of them connects over a hostfwd 127.0.0.1 port. Best-effort
+// only - an error here (no network yet, a container with no real NICs)
+// just means an empty extra-SAN list, not a fatal startup failure; a
+// DHCP lease that changes after this first-boot cert is issued is a
+// known limitation, not handled here (matches how the CA/admin cert
+// bootstrap is also a one-time, first-boot-only event).
+func localNetworkIPs() []net.IP {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return nil
+	}
+	var ips []net.IP
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok || ipNet.IP.IsLoopback() {
+			continue
+		}
+		ips = append(ips, ipNet.IP)
+	}
+	return ips
+}
 
 // confirmBootHealth runs internal/bootcommit.Confirm against a real
 // HAProxy health signal (ShowInfo succeeding means the stats socket is
