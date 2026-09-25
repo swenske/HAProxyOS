@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="brand/logo/janus-logo-mono-fond-sombre.svg" alt="Janus" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/janus-logo-mono-fond-sombre.svg">
+    <img src="brand/logo/janus-logo-mono.svg" alt="Janus" width="360" />
+  </picture>
 </p>
 
 # Janus
