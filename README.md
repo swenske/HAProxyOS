@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/janus-logo.svg" alt="Janus" width="120" height="120" />
+  <img src="brand/logo/janus-logo-mono-fond-sombre.svg" alt="Janus" />
 </p>
 
 # Janus
