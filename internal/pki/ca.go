@@ -2,8 +2,19 @@
 // self-signed CA per node, used to issue the node's own gRPC server
 // certificate and short-lived client certificates (see
 // SystemService.GenerateClientConfiguration). Every certificate is
-// Ed25519 - small keys, fast, no padding-oracle history, and well
-// supported by TLS 1.3, which is all this ever needs to speak.
+// ECDSA P-256 - was originally Ed25519 (small keys, fast, no
+// padding-oracle history), switched after a real Proxmox deployment hit
+// a browser dead end: the dashboard's own per-node view needs a real
+// browser to both verify the server certificate and sign a TLS client
+// certificate presented for mutual TLS (see dashboard/backend/internal/
+// nodeproxy), and Chromium's TLS stack (Chrome/Brave/Edge) has a long,
+// well-documented history of not supporting Ed25519 at all - general
+// server-certificate support only landed around Chrome 137 (May 2025),
+// and reliable client-certificate-authentication support is still far
+// from guaranteed even now. P-256 has no such gap in any mainstream TLS
+// stack, browser or otherwise - confirmed empirically (ERR_SSL_
+// VERSION_OR_CIPHER_MISMATCH from a real Brave browser against the old
+// Ed25519 dashboard identity cert, before this switch).
 //
 // Roles are carried in the leaf certificate's Subject.Organization field
 // (the same idiom Kubernetes client-cert auth uses for group membership)
@@ -15,7 +26,8 @@
 package pki
 
 import (
-	"crypto/ed25519"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -39,15 +51,16 @@ const (
 type CA struct {
 	Cert    *x509.Certificate
 	CertPEM []byte
-	Key     ed25519.PrivateKey
+	Key     *ecdsa.PrivateKey
 }
 
 // NewCA generates a brand new, self-signed CA.
 func NewCA(commonName string) (*CA, error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, fmt.Errorf("generate CA key: %w", err)
 	}
+	pub := &priv.PublicKey
 
 	serial, err := randomSerial()
 	if err != nil {
@@ -97,12 +110,12 @@ func LoadCA(certPEM, keyPEM []byte) (*CA, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse CA key: %w", err)
 	}
-	edKey, ok := key.(ed25519.PrivateKey)
+	ecKey, ok := key.(*ecdsa.PrivateKey)
 	if !ok {
-		return nil, fmt.Errorf("CA key is not Ed25519")
+		return nil, fmt.Errorf("CA key is not ECDSA")
 	}
 
-	return &CA{Cert: cert, CertPEM: certPEM, Key: edKey}, nil
+	return &CA{Cert: cert, CertPEM: certPEM, Key: ecKey}, nil
 }
 
 // KeyPEM returns the CA's private key, PKCS#8/PEM-encoded.
@@ -127,13 +140,14 @@ type IssueOptions struct {
 	ExtKeyUsage []x509.ExtKeyUsage
 }
 
-// Issue signs a new Ed25519 leaf certificate with the CA's key, valid
-// for leafValidity from now. Returns (certPEM, keyPEM).
+// Issue signs a new ECDSA P-256 leaf certificate with the CA's key,
+// valid for leafValidity from now. Returns (certPEM, keyPEM).
 func (ca *CA) Issue(opts IssueOptions) (certPEM, keyPEM []byte, err error) {
-	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate leaf key: %w", err)
 	}
+	pub := &priv.PublicKey
 
 	serial, err := randomSerial()
 	if err != nil {

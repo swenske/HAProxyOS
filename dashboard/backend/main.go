@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"sync"
@@ -293,8 +294,21 @@ func loadOrCreateDashboardIdentity(dataDir string) (tls.Certificate, error) {
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("generate dashboard identity: %w", err)
 	}
+	// App.jsx's openNode navigates to https://<window.location.hostname>:
+	// <port>/ - whatever host the browser used to load the main SPA in
+	// the first place (localhost most commonly, but not exclusively) -
+	// so the SAN list needs to cover that, not just this process's own
+	// view of itself. localhost/127.0.0.1/::1 are the guaranteed common
+	// case; pki.LocalIPs() covers a real LAN address too, for a
+	// --network host deployment or direct (non-Docker) local run - see
+	// dashboard/README.md. A previous version issued this certificate
+	// with zero SANs at all, which real modern TLS clients (browsers
+	// included) reject outright regardless of CommonName.
+	ips := append([]net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}, pki.LocalIPs()...)
 	certPEM, keyPEM, err := ca.Issue(pki.IssueOptions{
 		CommonName:  "dashboard",
+		DNSNames:    []string{"localhost"},
+		IPAddresses: ips,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	})
 	if err != nil {
