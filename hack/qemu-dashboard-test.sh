@@ -18,6 +18,16 @@
 #      dashboard/backend/internal/nodeproxy's own package doc for why
 #      that's not just a design choice but a cryptographic
 #      impossibility).
+#   3b. tranche 6: add-node via a .pfx upload instead of pasted PEM
+#      text (dashboard/backend/main.go's parseAddNodeRequest, the
+#      frontend's default mode as of dashboard/frontend/src/App.jsx's
+#      AddNodeForm) - a real openssl-built .pfx bundling the admin
+#      cert+key plus the node's ca.crt (via -certfile, exactly how a
+#      real user's would be built), added and immediately removed
+#      again so it doesn't interfere with the main JSON-based flow
+#      below. Also checks the two real error paths: a wrong password,
+#      and a .pfx missing the bundled CA certificate - both need a
+#      real, actionable message, not a generic parse failure.
 #   4. GET /api/nodes lists it (name/address/port only, no credential).
 #   5. hit the allocated per-node HTTPS port with the *bootstrap*
 #      admin cert as the TLS client certificate (any cert issued by the
@@ -162,6 +172,40 @@ fi
 MAIN_UI="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/")"
 echo "$MAIN_UI" | grep -q '<div id="root">' || { echo "Dashboard test FAILED: main SPA index.html not served at /: $MAIN_UI" >&2; exit 1; }
 echo "Main SPA OK: dashboard/frontend's built index.html is served at /"
+
+# --- add-node via .pfx upload (the frontend's default mode as of
+# tranche 6 - see dashboard/backend/main.go's parseAddNodeRequest and
+# dashboard/frontend/src/App.jsx's AddNodeForm) - a real .pfx built the
+# same way a user's would be (openssl pkcs12 -export -certfile ca.crt,
+# so the CA rides along inside the bundle, not just the leaf cert),
+# added and immediately removed again so it doesn't interfere with the
+# main JSON-based add-node flow below (still the primary path this
+# script exercises end to end - the .pfx path only needs proving it
+# reaches the same parseAddNodeRequest outcome, not a second full
+# relay/mTLS-gate/restart-persistence pass). Also checks the two real
+# error paths: a wrong password, and a .pfx missing the bundled CA.
+openssl pkcs12 -export -inkey "$WORKDIR/admin.key" -in "$WORKDIR/admin.crt" \
+  -certfile "$WORKDIR/ca.crt" -out "$WORKDIR/admin.pfx" -passout pass:dashboard-test-pfx >/dev/null 2>&1
+PFX_ADD_RESP="$(curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+  -F "name=pfx-test-node" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
+  -F "pfx_password=dashboard-test-pfx" -F "pfx=@$WORKDIR/admin.pfx;type=application/x-pkcs12")"
+PFX_NODE_ID="$(echo "$PFX_ADD_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)"
+[ -n "$PFX_NODE_ID" ] || { echo "Dashboard test FAILED: .pfx add-node didn't return an id: $PFX_ADD_RESP" >&2; exit 1; }
+curl -s -X DELETE "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${PFX_NODE_ID}" >/dev/null
+echo "Add-node via .pfx OK: $PFX_ADD_RESP"
+
+WRONG_PW_RESP="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+  -F "name=wrong-pw" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
+  -F "pfx_password=not-the-password" -F "pfx=@$WORKDIR/admin.pfx;type=application/x-pkcs12")"
+[ "$WRONG_PW_RESP" = "400" ] || { echo "Dashboard test FAILED: wrong .pfx password should return 400, got $WRONG_PW_RESP" >&2; exit 1; }
+
+openssl pkcs12 -export -inkey "$WORKDIR/admin.key" -in "$WORKDIR/admin.crt" \
+  -out "$WORKDIR/admin-no-ca.pfx" -passout pass:dashboard-test-pfx >/dev/null 2>&1
+NO_CA_RESP="$(curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+  -F "name=no-ca" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
+  -F "pfx_password=dashboard-test-pfx" -F "pfx=@$WORKDIR/admin-no-ca.pfx;type=application/x-pkcs12")"
+echo "$NO_CA_RESP" | grep -q "no CA certificate bundled" || { echo "Dashboard test FAILED: .pfx with no bundled CA should be refused with a clear message, got: $NO_CA_RESP" >&2; exit 1; }
+echo ".pfx error paths OK: wrong password and missing-CA both refused with a real, actionable message"
 
 # dashboardd allocates the first free port in its own pool - pin it low
 # for this test by patching the request's own expectations rather than

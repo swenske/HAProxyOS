@@ -71,6 +71,18 @@ form.add-node label {
   font-size: 0.9rem;
 }
 
+form.add-node .mode-toggle {
+  display: flex;
+  gap: 1.5rem;
+  font-size: 0.85rem;
+}
+
+form.add-node .mode-toggle label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+
 form.add-node .hint {
   font-size: 0.8rem;
   opacity: 0.7;

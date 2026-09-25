@@ -53,7 +53,8 @@ function NodeList({ nodes, onRemove, busy }) {
   )
 }
 
-const emptyForm = {
+const emptyPfxForm = { name: '', address: '', pfx_password: '' }
+const emptyPemForm = {
   name: '',
   address: '',
   ca_cert_pem: '',
@@ -61,27 +62,59 @@ const emptyForm = {
   bootstrap_key_pem: '',
 }
 
+// Two ways to hand the dashboard a one-time bootstrap admin credential
+// for a node - see dashboard/backend/main.go's parseAddNodeRequest.
+// .pfx upload is the default: the same file a user already imported
+// into their OS certificate store to view a node's own per-node page
+// (see dashboard/README.md) - no PEM text to copy/paste at all, a hard
+// cryptographic requirement (this dashboard needs its own private key
+// to keep talking to the node - a browser can never hand over a
+// private key, only prove it holds one - see nodeproxy's own package
+// doc) that .pfx upload gets as close to "just pick your cert" as that
+// requirement allows. Paste-PEM stays available as a fallback for a
+// script/CI caller with raw PEM files already in hand (hack/
+// qemu-dashboard-test.sh drives that path directly).
 function AddNodeForm({ onAdded }) {
-  const [form, setForm] = useState(emptyForm)
+  const [mode, setMode] = useState('pfx')
+  const [pfxForm, setPfxForm] = useState(emptyPfxForm)
+  const [pfxFile, setPfxFile] = useState(null)
+  const [pemForm, setPemForm] = useState(emptyPemForm)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
 
-  const set = (field) => (e) => setForm({ ...form, [field]: e.target.value })
+  const setPfx = (field) => (e) => setPfxForm({ ...pfxForm, [field]: e.target.value })
+  const setPem = (field) => (e) => setPemForm({ ...pemForm, [field]: e.target.value })
 
   async function submit(e) {
     e.preventDefault()
     setBusy(true)
     setError(null)
     try {
-      const resp = await fetch('/api/nodes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
+      let resp
+      if (mode === 'pfx') {
+        if (!pfxFile) throw new Error('choose a .pfx file')
+        const body = new FormData()
+        body.set('name', pfxForm.name)
+        body.set('address', pfxForm.address)
+        body.set('pfx_password', pfxForm.pfx_password)
+        body.set('pfx', pfxFile)
+        // No Content-Type header here on purpose - fetch sets the
+        // multipart boundary itself from the FormData body, and
+        // setting it manually would omit that boundary.
+        resp = await fetch('/api/nodes', { method: 'POST', body })
+      } else {
+        resp = await fetch('/api/nodes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pemForm),
+        })
+      }
       if (!resp.ok) {
         throw new Error(await resp.text())
       }
-      setForm(emptyForm)
+      setPfxForm(emptyPfxForm)
+      setPfxFile(null)
+      setPemForm(emptyPemForm)
       onAdded()
     } catch (err) {
       setError(err.message)
@@ -93,30 +126,76 @@ function AddNodeForm({ onAdded }) {
   return (
     <form className="add-node" onSubmit={submit}>
       <h2>Add a node</h2>
-      <label>
-        Name
-        <input value={form.name} onChange={set('name')} required />
-      </label>
-      <label>
-        Address (host:port, the node&apos;s real gRPC endpoint - default :9505)
-        <input value={form.address} onChange={set('address')} required placeholder="10.0.0.5:9505" />
-      </label>
-      <label>
-        CA certificate (the node&apos;s own ca.crt - not sensitive)
-        <textarea value={form.ca_cert_pem} onChange={set('ca_cert_pem')} required rows={4} />
-      </label>
-      <label>
-        Bootstrap admin certificate
-        <span className="hint">
-          Used once, immediately, to issue this dashboard&apos;s own dedicated credential -
-          never stored (see dashboard/backend/internal/nodeproxy&apos;s own design notes).
-        </span>
-        <textarea value={form.bootstrap_cert_pem} onChange={set('bootstrap_cert_pem')} required rows={4} />
-      </label>
-      <label>
-        Bootstrap admin key
-        <textarea value={form.bootstrap_key_pem} onChange={set('bootstrap_key_pem')} required rows={4} />
-      </label>
+      <div className="mode-toggle">
+        <label>
+          <input type="radio" checked={mode === 'pfx'} onChange={() => setMode('pfx')} />
+          Upload .pfx (recommended)
+        </label>
+        <label>
+          <input type="radio" checked={mode === 'pem'} onChange={() => setMode('pem')} />
+          Paste PEM (scripts/CI)
+        </label>
+      </div>
+
+      {mode === 'pfx' ? (
+        <>
+          <label>
+            Name
+            <input value={pfxForm.name} onChange={setPfx('name')} required />
+          </label>
+          <label>
+            Address (host:port, the node&apos;s real gRPC endpoint - default :9505)
+            <input value={pfxForm.address} onChange={setPfx('address')} required placeholder="10.0.0.5:9505" />
+          </label>
+          <label>
+            Bootstrap credential (.pfx)
+            <span className="hint">
+              The same file you imported into your browser/OS to view a node&apos;s own page -
+              must include the node&apos;s ca.crt bundled in (openssl pkcs12 -export -certfile
+              ca.crt ...). Used once, immediately, to issue this dashboard&apos;s own dedicated
+              credential - never stored.
+            </span>
+            <input
+              type="file"
+              accept=".pfx,.p12"
+              onChange={(e) => setPfxFile(e.target.files?.[0] ?? null)}
+              required
+            />
+          </label>
+          <label>
+            .pfx password
+            <input type="password" value={pfxForm.pfx_password} onChange={setPfx('pfx_password')} />
+          </label>
+        </>
+      ) : (
+        <>
+          <label>
+            Name
+            <input value={pemForm.name} onChange={setPem('name')} required />
+          </label>
+          <label>
+            Address (host:port, the node&apos;s real gRPC endpoint - default :9505)
+            <input value={pemForm.address} onChange={setPem('address')} required placeholder="10.0.0.5:9505" />
+          </label>
+          <label>
+            CA certificate (the node&apos;s own ca.crt - not sensitive)
+            <textarea value={pemForm.ca_cert_pem} onChange={setPem('ca_cert_pem')} required rows={4} />
+          </label>
+          <label>
+            Bootstrap admin certificate
+            <span className="hint">
+              Used once, immediately, to issue this dashboard&apos;s own dedicated credential -
+              never stored (see dashboard/backend/internal/nodeproxy&apos;s own design notes).
+            </span>
+            <textarea value={pemForm.bootstrap_cert_pem} onChange={setPem('bootstrap_cert_pem')} required rows={4} />
+          </label>
+          <label>
+            Bootstrap admin key
+            <textarea value={pemForm.bootstrap_key_pem} onChange={setPem('bootstrap_key_pem')} required rows={4} />
+          </label>
+        </>
+      )}
+
       {error && <p className="error">{error}</p>}
       <button type="submit" disabled={busy}>
         {busy ? 'Adding…' : 'Add node'}

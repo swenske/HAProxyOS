@@ -15,18 +15,22 @@ import (
 	"crypto/x509"
 	"embed"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 
 	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
 	"github.com/swenske/HAProxyOS/internal/pki"
@@ -118,18 +122,78 @@ func (a *app) startListener(n *store.Node) error {
 	return nil
 }
 
-// addNodeRequest is what the "add a node" form (dashboard/frontend,
-// still to come) posts. BootstrapCertPEM/BootstrapKeyPEM are the user's
-// own existing admin credential for the target node - used exactly
-// once, in this same request, to mint this dashboard's own dedicated
-// service credential (see internal/api's GenerateClientConfiguration),
-// then never stored, never logged, never written to disk.
+// addNodeRequest is the JSON form of "add a node": three raw PEM blocks
+// pasted in directly. Superseded in the frontend by a .pfx upload (see
+// parseAddNodeRequest below) - copying three separate PEM blocks by
+// hand turned out to be real friction for one single one-time event,
+// the same lesson cmd/haproxyosd/main.go's own bootstrap print already
+// learned (see its own comment on why the CA cert prints alongside the
+// admin cert/key rather than being split across two recovery paths).
+// Kept working, not just left for compatibility: hack/
+// qemu-dashboard-test.sh drives this JSON path directly, and a script/
+// CI caller with raw PEM files in hand (e.g. straight out of
+// haproxyosctl pki generate-client-config) has no reason to wrap them
+// in a PKCS#12 file first just to satisfy the UI's preferred format.
 type addNodeRequest struct {
 	Name             string `json:"name"`
 	Address          string `json:"address"`
 	CACertPEM        string `json:"ca_cert_pem"`
 	BootstrapCertPEM string `json:"bootstrap_cert_pem"`
 	BootstrapKeyPEM  string `json:"bootstrap_key_pem"`
+}
+
+// parseAddNodeRequest reads name/address/CA-cert/bootstrap-cert/
+// bootstrap-key from either a multipart/form-data upload (fields
+// "name", "address", "pfx" file, "pfx_password" - the default the
+// frontend now uses: a single .pfx file, no PEM text to paste at all)
+// or the older addNodeRequest JSON body, dispatched on Content-Type.
+// Both arrive at exactly the same three PEM blocks handleAddNode
+// already knew what to do with - this function's only job is getting
+// there from either shape.
+func parseAddNodeRequest(r *http.Request) (name, address string, caPEM, certPEM, keyPEM []byte, err error) {
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		// 1 MiB is generous for a .pfx holding one EC key + two small
+		// certs (a few KB in practice) - just a sanity cap, not a real
+		// constraint.
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			return "", "", nil, nil, nil, fmt.Errorf("parse form: %w", err)
+		}
+		name = r.FormValue("name")
+		address = r.FormValue("address")
+		password := r.FormValue("pfx_password")
+
+		file, _, ferr := r.FormFile("pfx")
+		if ferr != nil {
+			return "", "", nil, nil, nil, fmt.Errorf("read pfx upload: %w", ferr)
+		}
+		defer file.Close()
+		pfxData, rerr := io.ReadAll(file)
+		if rerr != nil {
+			return "", "", nil, nil, nil, fmt.Errorf("read pfx upload: %w", rerr)
+		}
+
+		key, cert, caCerts, derr := pkcs12.DecodeChain(pfxData, password)
+		if derr != nil {
+			return "", "", nil, nil, nil, fmt.Errorf("decode pfx (wrong password?): %w", derr)
+		}
+		if len(caCerts) == 0 {
+			return "", "", nil, nil, nil, fmt.Errorf("pfx has no CA certificate bundled - it needs to include the node's ca.crt (e.g. openssl pkcs12 -export -certfile ca.crt ...)")
+		}
+		keyDER, merr := x509.MarshalPKCS8PrivateKey(key)
+		if merr != nil {
+			return "", "", nil, nil, nil, fmt.Errorf("marshal private key from pfx: %w", merr)
+		}
+		certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw})
+		keyPEM = pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+		caPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCerts[0].Raw})
+		return name, address, caPEM, certPEM, keyPEM, nil
+	}
+
+	var req addNodeRequest
+	if derr := json.NewDecoder(r.Body).Decode(&req); derr != nil {
+		return "", "", nil, nil, nil, fmt.Errorf("decode request: %w", derr)
+	}
+	return req.Name, req.Address, []byte(req.CACertPEM), []byte(req.BootstrapCertPEM), []byte(req.BootstrapKeyPEM), nil
 }
 
 func (a *app) handleNodes(w http.ResponseWriter, r *http.Request) {
@@ -156,28 +220,24 @@ func (a *app) handleNodes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) handleAddNode(w http.ResponseWriter, r *http.Request) {
-	var req addNodeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, fmt.Sprintf("decode request: %v", err), http.StatusBadRequest)
+	name, address, caPEM, bootstrapCertPEM, bootstrapKeyPEM, err := parseAddNodeRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	if req.Name == "" || req.Address == "" {
+	if name == "" || address == "" {
 		http.Error(w, "name and address are required", http.StatusBadRequest)
 		return
 	}
-
-	caPEM := []byte(req.CACertPEM)
-	bootstrapCertPEM := []byte(req.BootstrapCertPEM)
-	bootstrapKeyPEM := []byte(req.BootstrapKeyPEM)
 
 	tlsConfig, err := pki.ClientTLSConfig(caPEM, bootstrapCertPEM, bootstrapKeyPEM)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("build TLS config from provided credentials: %v", err), http.StatusBadRequest)
 		return
 	}
-	conn, err := grpc.NewClient(req.Address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	conn, err := grpc.NewClient(address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("dial %s: %v", req.Address, err), http.StatusBadGateway)
+		http.Error(w, fmt.Sprintf("dial %s: %v", address, err), http.StatusBadGateway)
 		return
 	}
 	defer conn.Close()
@@ -188,11 +248,11 @@ func (a *app) handleAddNode(w http.ResponseWriter, r *http.Request) {
 		Roles: []string{pki.RoleAdmin},
 	})
 	if err != nil {
-		http.Error(w, fmt.Sprintf("GenerateClientConfiguration against %s: %v - the provided bootstrap credential couldn't reach or authenticate to that node", req.Address, err), http.StatusBadGateway)
+		http.Error(w, fmt.Sprintf("GenerateClientConfiguration against %s: %v - the provided bootstrap credential couldn't reach or authenticate to that node", address, err), http.StatusBadGateway)
 		return
 	}
-	// req.BootstrapCertPEM/BootstrapKeyPEM are never referenced again
-	// past this point - only cfg's freshly-issued service credential is
+	// bootstrapCertPEM/bootstrapKeyPEM are never referenced again past
+	// this point - only cfg's freshly-issued service credential is
 	// persisted below.
 
 	port, err := a.allocatePort()
@@ -202,8 +262,8 @@ func (a *app) handleAddNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	node := &store.Node{
-		Name:           req.Name,
-		Address:        req.Address,
+		Name:           name,
+		Address:        address,
 		Port:           port,
 		CACertPEM:      cfg.GetCa(),
 		ServiceCertPEM: cfg.GetCrt(),
