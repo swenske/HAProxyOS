@@ -125,6 +125,7 @@ func main() {
 	mux.HandleFunc("/api/nodes", app.requireAuth(app.handleNodes))
 	mux.HandleFunc("/api/nodes/", app.requireAuth(app.handleNode))
 	mux.HandleFunc("/api/pending", app.requireAuth(app.handlePendingList))
+	mux.HandleFunc("/api/pending/", app.requireAuth(app.handlePendingAction))
 	mux.Handle("/", http.FileServerFS(spa))
 
 	log.Printf("dashboardd listening on %s", *addr)

@@ -53,6 +53,48 @@ function NodeList({ nodes, onRemove, busy }) {
   )
 }
 
+// PendingList is the Tailscale-style admission queue: a node announced
+// itself (see dashboard/backend/register.go's own doc comment for why
+// that's a dedicated TLS port, not this one) but isn't reachable until
+// a human approves it here - never fully automatic.
+function PendingList({ pending, onApprove, onReject, busy }) {
+  if (pending.length === 0) {
+    return null
+  }
+  return (
+    <>
+      <h2>Pending nodes</h2>
+      <table className="nodes">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Address</th>
+            <th>Announced</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {pending.map((p) => (
+            <tr key={p.id}>
+              <td>{p.name}</td>
+              <td>{p.address}</td>
+              <td>{new Date(p.announced_at).toLocaleString()}</td>
+              <td className="actions">
+                <button disabled={busy} onClick={() => onApprove(p.id)}>
+                  Approve
+                </button>
+                <button className="danger" disabled={busy} onClick={() => onReject(p.id)}>
+                  Reject
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </>
+  )
+}
+
 const emptyPfxForm = { name: '', address: '', pfx_password: '' }
 const emptyPemForm = {
   name: '',
@@ -336,6 +378,7 @@ function AuthGate({ children }) {
 
 function MainApp() {
   const [nodes, setNodes] = useState([])
+  const [pending, setPending] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -343,10 +386,11 @@ function MainApp() {
   async function refresh() {
     setLoading(true)
     try {
-      const resp = await fetch('/api/nodes')
-      if (!resp.ok) throw new Error(await resp.text())
-      const data = await resp.json()
-      setNodes(data ?? [])
+      const [nodesResp, pendingResp] = await Promise.all([fetch('/api/nodes'), fetch('/api/pending')])
+      if (!nodesResp.ok) throw new Error(await nodesResp.text())
+      if (!pendingResp.ok) throw new Error(await pendingResp.text())
+      setNodes((await nodesResp.json()) ?? [])
+      setPending((await pendingResp.json()) ?? [])
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -372,6 +416,32 @@ function MainApp() {
     }
   }
 
+  async function approve(id) {
+    setBusy(true)
+    try {
+      const resp = await fetch(`/api/pending/${id}/approve`, { method: 'POST' })
+      if (!resp.ok) throw new Error(await resp.text())
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function reject(id) {
+    setBusy(true)
+    try {
+      const resp = await fetch(`/api/pending/${id}/reject`, { method: 'POST' })
+      if (!resp.ok) throw new Error(await resp.text())
+      await refresh()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function logout() {
     await fetch('/api/auth/logout', { method: 'POST' })
     // A full reload is simplest here: AuthGate's own state doesn't
@@ -387,6 +457,8 @@ function MainApp() {
         <button onClick={logout}>Log out</button>
       </div>
       {error && <p className="error">{error}</p>}
+      {!loading && <PendingList pending={pending} onApprove={approve} onReject={reject} busy={busy} />}
+      <h2>Nodes</h2>
       {loading ? <p>Loading…</p> : <NodeList nodes={nodes} onRemove={remove} busy={busy} />}
       <AddNodeForm onAdded={refresh} />
     </main>

@@ -114,6 +114,29 @@
 #      pending entry survives a dashboardd restart (same reasoning as
 #      the node registry itself - a node only announces once per boot,
 #      so losing this to an in-memory store would strand it).
+#   12. Point 2 suite, tranche 3: approve/reject the pending queue
+#      (register.go's handlePendingAction/approvePending/rejectPending,
+#      wired into the frontend's PendingList component). Two more
+#      synthetic self-registrations (separate from the one used for the
+#      restart-persistence check, which is left untouched): approving
+#      one must move it into GET /api/nodes with a real allocated port
+#      and a genuinely running mTLS-gated listener (any cert from its
+#      own CA completes a real TLS handshake against it), and remove it
+#      from /api/pending; rejecting the other must remove it from
+#      /api/pending and it must never appear in /api/nodes at all.
+#      Also checks that rejecting an already-rejected id is a real 404,
+#      not a silent success. Writing this coverage surfaced a real bug
+#      in approvePending itself, fixed alongside it: on a listener-start
+#      failure (e.g. a port conflict) it left the pending entry in place
+#      "to be retried" but had already called store.Add - a retry then
+#      called store.Add a second time with a fresh id, permanently
+#      orphaning the first, listener-less entry instead of actually
+#      retrying it. Fixed by rolling the store entry back
+#      (store.Remove) whenever startListener fails, verified by hand
+#      against a live dashboardd instance (occupying the allocated port
+#      to force the failure, confirming no orphan after the failed
+#      attempt, then freeing the port and confirming a clean retry)
+#      before encoding it here.
 #
 # Usage: hack/qemu-dashboard-test.sh <disk.img> <dashboardd-bin>
 set -euo pipefail
@@ -264,6 +287,90 @@ bad_key_code="$(echo "$bad_key_resp" | tail -1)"
 [ "$bad_key_code" = "400" ] || { echo "Dashboard test FAILED: registration with a malformed key should be 400, got $bad_key_code: $bad_key_resp" >&2; exit 1; }
 echo "$bad_key_resp" | grep -q "don't form a valid certificate" || { echo "Dashboard test FAILED: malformed key should get a real, actionable error, got: $bad_key_resp" >&2; exit 1; }
 echo "Registration error paths OK: missing fields and a malformed cert/key pair both refused with a real error"
+
+# --- Point 2 suite, tranche 3: approve/reject the pending queue
+# (dashboard/backend/register.go's handlePendingAction/approvePending/
+# rejectPending, wired into the frontend's new PendingList component) -
+# two more synthetic self-registrations, separate from $PENDING_ID above
+# (which stays untouched here so the restart-persistence check further
+# down still has a genuinely pending entry to find). One is approved -
+# must land in GET /api/nodes with a real allocated port and a working
+# mTLS-gated listener, and disappear from /api/pending. The other is
+# rejected - must disappear from /api/pending and never appear in
+# /api/nodes at all.
+for n in approve-me reject-me; do
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+    -keyout "$WORKDIR/${n}-service.key" -out "$WORKDIR/${n}-service.csr" -nodes -subj "/CN=service-$n" >/dev/null 2>&1
+  openssl x509 -req -in "$WORKDIR/${n}-service.csr" -CA "$WORKDIR/reg-node-ca.crt" -CAkey "$WORKDIR/reg-node-ca.key" \
+    -CAcreateserial -out "$WORKDIR/${n}-service.crt" -days 1 >/dev/null 2>&1
+  python3 -c '
+import json, sys
+ca, crt, key, name, out = sys.argv[1:6]
+req = {
+    "name": name,
+    "address": "10.0.0.9:9505",
+    "ca_cert_pem": open(ca).read(),
+    "service_cert_pem": open(crt).read(),
+    "service_key_pem": open(key).read(),
+}
+open(out, "w").write(json.dumps(req))
+' "$WORKDIR/reg-node-ca.crt" "$WORKDIR/${n}-service.crt" "$WORKDIR/${n}-service.key" "$n" "$WORKDIR/register-${n}.json"
+done
+
+APPROVE_REGISTER_RESP="$(curl -sk -X POST "https://127.0.0.1:${DASHBOARD_REGISTER_PORT}/register" -H "Content-Type: application/json" -d @"$WORKDIR/register-approve-me.json")"
+APPROVE_ID="$(echo "$APPROVE_REGISTER_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)"
+[ -n "$APPROVE_ID" ] || { echo "Dashboard test FAILED: approve-me registration didn't return an id: $APPROVE_REGISTER_RESP" >&2; exit 1; }
+
+REJECT_REGISTER_RESP="$(curl -sk -X POST "https://127.0.0.1:${DASHBOARD_REGISTER_PORT}/register" -H "Content-Type: application/json" -d @"$WORKDIR/register-reject-me.json")"
+REJECT_ID="$(echo "$REJECT_REGISTER_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)"
+[ -n "$REJECT_ID" ] || { echo "Dashboard test FAILED: reject-me registration didn't return an id: $REJECT_REGISTER_RESP" >&2; exit 1; }
+
+APPROVE_RESP="$(curl -s -b "$COOKIE_JAR" -w '\n%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending/${APPROVE_ID}/approve")"
+APPROVE_CODE="$(echo "$APPROVE_RESP" | tail -1)"
+APPROVE_BODY="$(echo "$APPROVE_RESP" | sed '$d')"
+[ "$APPROVE_CODE" = "201" ] || { echo "Dashboard test FAILED: approve should return 201, got $APPROVE_CODE: $APPROVE_BODY" >&2; exit 1; }
+APPROVED_NODE_ID="$(echo "$APPROVE_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
+APPROVED_PORT="$(echo "$APPROVE_BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["port"])')"
+[ -n "$APPROVED_PORT" ] || { echo "Dashboard test FAILED: approve response missing an allocated port: $APPROVE_BODY" >&2; exit 1; }
+
+REJECT_CODE="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending/${REJECT_ID}/reject")"
+[ "$REJECT_CODE" = "204" ] || { echo "Dashboard test FAILED: reject should return 204, got $REJECT_CODE" >&2; exit 1; }
+
+PENDING_AFTER_ACTIONS="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
+if echo "$PENDING_AFTER_ACTIONS" | grep -qF "\"id\":\"$APPROVE_ID\""; then
+  echo "Dashboard test FAILED: approved entry still listed as pending: $PENDING_AFTER_ACTIONS" >&2
+  exit 1
+fi
+if echo "$PENDING_AFTER_ACTIONS" | grep -qF "\"id\":\"$REJECT_ID\""; then
+  echo "Dashboard test FAILED: rejected entry still listed as pending: $PENDING_AFTER_ACTIONS" >&2
+  exit 1
+fi
+echo "$PENDING_AFTER_ACTIONS" | grep -qF "\"id\":\"$PENDING_ID\"" || { echo "Dashboard test FAILED: the untouched self-registered-test-node entry disappeared from pending: $PENDING_AFTER_ACTIONS" >&2; exit 1; }
+
+NODES_AFTER_ACTIONS="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+echo "$NODES_AFTER_ACTIONS" | grep -qF "\"id\":\"$APPROVED_NODE_ID\"" || { echo "Dashboard test FAILED: approved node not listed in /api/nodes: $NODES_AFTER_ACTIONS" >&2; exit 1; }
+if echo "$NODES_AFTER_ACTIONS" | grep -q '"name":"reject-me"'; then
+  echo "Dashboard test FAILED: rejected node appeared in /api/nodes: $NODES_AFTER_ACTIONS" >&2
+  exit 1
+fi
+
+# The approved node's listener must genuinely be up and its mTLS gate
+# must accept a cert from its own CA - this synthetic node's "address"
+# (10.0.0.9:9505) isn't a real janusd, so the relay itself can't
+# succeed (expect a 502 once nodeproxy tries to actually dial it, not a
+# 200) - what matters here is that the TLS handshake completes at all
+# (proving the listener is up and the gate accepts the right CA), not
+# "000" (connection refused/handshake failure).
+approve_relay_code="$(curl -sk -o /dev/null -w '%{http_code}' --cert "$WORKDIR/approve-me-service.crt" --key "$WORKDIR/approve-me-service.key" "https://127.0.0.1:${APPROVED_PORT}/api/info" || true)"
+[ "$approve_relay_code" != "000" ] || { echo "Dashboard test FAILED: approved node's listener isn't up at all (port $APPROVED_PORT)" >&2; exit 1; }
+
+reject_unknown_id_code="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending/${REJECT_ID}/reject")"
+[ "$reject_unknown_id_code" = "404" ] || { echo "Dashboard test FAILED: rejecting an already-rejected id should be 404, got $reject_unknown_id_code" >&2; exit 1; }
+
+# clean up the approved test node so it doesn't interfere with anything below
+curl -s -b "$COOKIE_JAR" -X DELETE "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${APPROVED_NODE_ID}" >/dev/null
+
+echo "Pending approve/reject OK: approve moves the entry into /api/nodes with a real listener, reject discards it, a second reject on the same id is a real 404"
 
 # --- add-node via .pfx upload (the frontend's default mode as of
 # tranche 6 - see dashboard/backend/main.go's parseAddNodeRequest and
