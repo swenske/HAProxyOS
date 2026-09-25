@@ -9,29 +9,36 @@
     </style>
   </defs>
   <g class="janus-fill">
-    <!-- shoulders, tapering up into the neck (overlaps the bottom of
-         both head shapes below, no visible seam) -->
-    <path d="M 60 185 Q 60 132 90 105 L 90 150 L 110 150 L 110 105 Q 140 132 140 185 Z" />
+    <!-- shoulders/toga base -->
+    <path d="M 55 195 Q 55 158 100 150 Q 145 158 145 195 Z" />
 
-    <!-- left-facing profile: flat edge at center, round bulge to the
-         left, with a small nose-bump partway down -->
-    <path d="
-      M 95 35
-      A 38 38 0 1 0 95 111
-      L 95 90
-      L 82 82
-      L 95 74
-      Z" />
-    <circle cx="80" cy="55" r="4.5" fill="#ffffff" />
+    <!-- left beard: generously overlaps the head shape below so the
+         two fuse with no visible seam/gap -->
+    <path d="M 100 68 Q 60 74 58 110 Q 56 148 100 152 Z" />
+    <!-- right beard (mirror) -->
+    <path d="M 100 68 Q 140 74 142 110 Q 144 148 100 152 Z" />
 
-    <!-- right-facing profile (mirror) -->
+    <!-- left head: round crown, flat/seamed at center, small nose notch -->
     <path d="
-      M 105 35
-      A 38 38 0 1 1 105 111
-      L 105 90
-      L 118 82
-      L 105 74
+      M 100 25
+      A 30 30 0 1 0 100 85
+      L 100 75
+      L 90 70
+      L 100 65
       Z" />
-    <circle cx="120" cy="55" r="4.5" fill="#ffffff" />
+    <circle cx="76" cy="48" r="4" fill="#ffffff" />
+
+    <!-- right head (mirror) -->
+    <path d="
+      M 100 25
+      A 30 30 0 1 1 100 85
+      L 100 75
+      L 110 70
+      L 100 65
+      Z" />
+    <circle cx="124" cy="48" r="4" fill="#ffffff" />
+
+    <!-- center seam, crown to collar -->
+    <rect x="98.5" y="23" width="3" height="132" />
   </g>
 </svg>
