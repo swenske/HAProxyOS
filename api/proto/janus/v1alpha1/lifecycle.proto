@@ -50,6 +50,17 @@ message InstallRequest {
   // Fails if the disk already has a Janus install (use
   // Rollback/Upgrade instead).
   string disk = 2;
+  // Optional: a Controller for the freshly-installed node to
+  // self-register with on first boot (see docs/architecture.md's node
+  // self-registration design). Written onto the new STATE filesystem's
+  // controller/ directory, read back by janusd at boot - if left
+  // unset, the installed node never announces itself anywhere, same as
+  // every install before this field existed. controller_ca_cert must
+  // be set whenever controller_address is: the node has to already
+  // know which CA to trust before it ever dials the Controller - there
+  // is deliberately no trust-on-first-use fallback.
+  string controller_address = 3;
+  bytes controller_ca_cert = 4;
 }
 
 message InstallResponse {

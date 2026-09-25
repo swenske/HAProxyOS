@@ -58,6 +58,9 @@ func (l *Lifecycle) Install(req *janusv1alpha1.InstallRequest, stream janusv1alp
 	if bundleDir == "" {
 		return status.Errorf(codes.InvalidArgument, "source.reference is required - a local release bundle directory (see image/release/assemble.sh); real OCI/HTTPS distribution isn't implemented yet")
 	}
+	if req.GetControllerAddress() != "" && len(req.GetControllerCaCert()) == 0 {
+		return status.Errorf(codes.InvalidArgument, "controller_ca_cert is required whenever controller_address is set - the node has to already know which CA to trust before it ever dials the Controller")
+	}
 
 	send := func(stage string, progress float64, message string) error {
 		return stream.Send(&janusv1alpha1.InstallResponse{Stage: stage, Progress: progress, Message: message})
@@ -152,8 +155,12 @@ func (l *Lifecycle) Install(req *janusv1alpha1.InstallRequest, stream janusv1alp
 	if err := send("formatting-state", 0.6, "creating the persistent STATE filesystem"); err != nil {
 		return err
 	}
-	if _, err := disk.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 6, FSType: filesystem.TypeExt4, VolumeLabel: "janus-state"}); err != nil {
+	stateFS, err := disk.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 6, FSType: filesystem.TypeExt4, VolumeLabel: "janus-state"})
+	if err != nil {
 		return status.Errorf(codes.Internal, "create STATE filesystem: %v", err)
+	}
+	if err := writeControllerConfig(stateFS, req); err != nil {
+		return err
 	}
 
 	if err := send("writing-esp", 0.8, "building the ESP"); err != nil {
@@ -169,15 +176,15 @@ func (l *Lifecycle) Install(req *janusv1alpha1.InstallRequest, stream janusv1alp
 	if err := espFS.Mkdir("/JANUS"); err != nil {
 		return status.Errorf(codes.Internal, "mkdir /JANUS: %v", err)
 	}
-	if err := writeESPFile(espFS, "/JANUS/UKI-A.EFI", ukiA); err != nil {
+	if err := writeFSFile(espFS, "/JANUS/UKI-A.EFI", ukiA); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
-	if err := writeESPFile(espFS, "/JANUS/UKI-B.EFI", ukiB); err != nil {
+	if err := writeFSFile(espFS, "/JANUS/UKI-B.EFI", ukiB); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
 	// Slot A active by default - the same starting point image/disk/
 	// assemble.sh's own default ACTIVE_SLOT produces.
-	if err := writeESPFile(espFS, "/EFI/BOOT/BOOTX64.EFI", ukiA); err != nil {
+	if err := writeFSFile(espFS, "/EFI/BOOT/BOOTX64.EFI", ukiA); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
 
@@ -250,13 +257,51 @@ func writeDiskAt(d *diskpkg.Disk, startSector uint64, data []byte) error {
 	return err
 }
 
-func writeESPFile(fs filesystem.FileSystem, path string, data []byte) error {
+func writeFSFile(fs filesystem.FileSystem, path string, data []byte) error {
 	f, err := fs.OpenFile(path, os.O_CREATE|os.O_RDWR)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", path, err)
 	}
 	if _, err := f.Write(data); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+// writeControllerConfig writes the node self-registration config
+// (controller_address/controller_ca_cert, see InstallRequest's own doc
+// comment) onto the freshly-created STATE filesystem, under a
+// controller/ directory - the same one-directory-per-concern convention
+// STATE already uses on a running node (pki/, haproxy/, boot/, see
+// rootfs/init/main.go's mountState), just written here directly through
+// go-diskfs rather than a bind mount, since STATE doesn't exist as a
+// mountable device node yet at Install time. A future janusd boot reads
+// this back to decide whether to self-register - not built yet (Point 2
+// suite tranche 5); this tranche is scoped to Install writing the files
+// correctly, verified directly off the resulting STATE filesystem
+// (hack/lifecycle-install-test.sh), not by booting and having anything
+// consume them. A blank controller_address (the common case - most
+// installs have no Controller at all) writes nothing, same as every
+// install before this field existed.
+func writeControllerConfig(fs filesystem.FileSystem, req *janusv1alpha1.InstallRequest) error {
+	addr := req.GetControllerAddress()
+	if addr == "" {
+		return nil
+	}
+	// No leading slash, unlike the ESP (FAT32) paths elsewhere in this
+	// file: go-diskfs's ext4 driver runs Mkdir's path through Go's
+	// io/fs.ValidPath, which rejects a leading "/" outright
+	// (io.fs.ErrInvalid, "invalid argument") - found by a real Install
+	// call failing with exactly that error, not assumed from the
+	// FAT32 convention already used above.
+	if err := fs.Mkdir("controller"); err != nil {
+		return status.Errorf(codes.Internal, "mkdir STATE controller/: %v", err)
+	}
+	if err := writeFSFile(fs, "controller/address", []byte(addr)); err != nil {
+		return status.Errorf(codes.Internal, "%v", err)
+	}
+	if err := writeFSFile(fs, "controller/ca.crt", req.GetControllerCaCert()); err != nil {
+		return status.Errorf(codes.Internal, "%v", err)
 	}
 	return nil
 }

@@ -57,6 +57,16 @@
 #      comes back up healthy on slot B - since Install wrote *identical*
 #      content and UKI to both slots, this proves that claim for real
 #      rather than only ever having booted slot A.
+#   8. Point 2 suite, tranche 4: Install called with
+#      -controller-address/-controller-ca (a synthetic Controller CA,
+#      since only its bytes matter here - janusd verifying against it
+#      is tranche 5, not built yet) - checks that controller/address
+#      and controller/ca.crt land on the blank disk's own STATE
+#      filesystem with exactly the right content, extracted directly
+#      (no boot needed, this tranche is Install's write side only), and
+#      that -controller-address without -controller-ca is refused
+#      client-side by janusctl before it ever reaches janusd (the
+#      proto's own InstallRequest doc comment: no trust-on-first-use).
 #
 # Usage: hack/lifecycle-install-test.sh <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>
 # <rootfs-dir> must contain rootfs.squashfs/rootfs.verity/rootfs.roothash
@@ -178,7 +188,18 @@ echo "Native janusd OK: PKI bootstrapped at $PKI_DIR"
 BLANK_DISK="$WORKDIR/blank-disk.img"
 truncate -s "${DISK_MB}M" "$BLANK_DISK"
 
-INSTALL_OUT="$(sudo "$CTL" "${NATIVE_CTL_ARGS[@]}" lifecycle install -sha256 "$SHA256" "$BLANK_DISK" "$BUNDLE")"
+# Point 2 suite, tranche 4: a synthetic Controller CA cert, standing in
+# for a real Janus Controller's own - only its bytes matter here, proto
+# doesn't validate this is a real cert, and neither does Install (it
+# just writes what it's given; janusd is what will eventually verify
+# against it, tranche 5, not built yet).
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+  -keyout "$WORKDIR/controller-ca.key" -out "$WORKDIR/controller-ca.crt" -days 1 -nodes -subj "/CN=test Controller CA" >/dev/null 2>&1
+CONTROLLER_ADDRESS="10.20.30.40:8443"
+
+INSTALL_OUT="$(sudo "$CTL" "${NATIVE_CTL_ARGS[@]}" lifecycle install -sha256 "$SHA256" \
+  -controller-address "$CONTROLLER_ADDRESS" -controller-ca "$WORKDIR/controller-ca.crt" \
+  "$BLANK_DISK" "$BUNDLE")"
 echo "$INSTALL_OUT"
 if ! echo "$INSTALL_OUT" | grep -qi '\[done '; then
   echo "Install test FAILED: Install never reached the 'done' stage" >&2
@@ -186,6 +207,37 @@ if ! echo "$INSTALL_OUT" | grep -qi '\[done '; then
 fi
 sudo chown "$(id -u):$(id -g)" "$BLANK_DISK"
 echo "Part 1 OK: Install partitioned a blank file from scratch and wrote a full image"
+
+# -controller-address without -controller-ca must be refused (proto's
+# own InstallRequest doc comment: no trust-on-first-use allowed) -
+# checked against janusctl's own client-side validation, which fails
+# before even dialing janusd.
+if sudo "$CTL" "${NATIVE_CTL_ARGS[@]}" lifecycle install -sha256 "$SHA256" \
+  -controller-address "$CONTROLLER_ADDRESS" "$WORKDIR/unused-disk.img" "$BUNDLE" 2>"$WORKDIR/no-ca-denied.log"; then
+  echo "Install test FAILED: -controller-address without -controller-ca should be refused" >&2
+  exit 1
+fi
+grep -qi "controller-ca is required" "$WORKDIR/no-ca-denied.log" || { echo "Install test FAILED: expected a '-controller-ca is required' refusal, got:" >&2; cat "$WORKDIR/no-ca-denied.log" >&2; exit 1; }
+echo "Part 1b OK: -controller-address without -controller-ca correctly refused client-side"
+
+# --- the controller/ directory Install wrote onto STATE must contain
+# exactly what was passed above - extracted directly off the blank
+# disk's own STATE partition, no boot required (this tranche only
+# covers Install's write side; a future janusd boot consuming it is
+# tranche 5, not built yet). Extracted files are named distinctly from
+# the source cert ($WORKDIR/controller-ca.crt above) to avoid dump
+# silently overwriting it.
+CTRL_STATE_START_SECTOR="$(sgdisk -i 6 "$BLANK_DISK" | awk -F': ' '/^First sector/ {print $2}' | awk '{print $1}')"
+CTRL_STATE_SIZE_SECTORS="$(sgdisk -i 6 "$BLANK_DISK" | awk -F': ' '/^Partition size/ {print $2}' | awk '{print $1}')"
+CTRL_STATE_IMG="$WORKDIR/controller-state.img"
+dd if="$BLANK_DISK" of="$CTRL_STATE_IMG" bs=512 skip="$CTRL_STATE_START_SECTOR" count="$CTRL_STATE_SIZE_SECTORS" status=none
+debugfs -R "dump controller/address $WORKDIR/extracted-controller-address" "$CTRL_STATE_IMG" >/dev/null 2>&1
+debugfs -R "dump controller/ca.crt $WORKDIR/extracted-controller-ca.crt" "$CTRL_STATE_IMG" >/dev/null 2>&1
+[ -s "$WORKDIR/extracted-controller-address" ] || { echo "Install test FAILED: couldn't extract controller/address from Install's own STATE partition" >&2; exit 1; }
+[ -s "$WORKDIR/extracted-controller-ca.crt" ] || { echo "Install test FAILED: couldn't extract controller/ca.crt from Install's own STATE partition" >&2; exit 1; }
+[ "$(cat "$WORKDIR/extracted-controller-address")" = "$CONTROLLER_ADDRESS" ] || { echo "Install test FAILED: controller/address was $(cat "$WORKDIR/extracted-controller-address"), want $CONTROLLER_ADDRESS" >&2; exit 1; }
+cmp -s "$WORKDIR/controller-ca.crt" "$WORKDIR/extracted-controller-ca.crt" || { echo "Install test FAILED: controller/ca.crt on STATE doesn't match what was passed to Install" >&2; exit 1; }
+echo "Part 1c OK: controller/address and controller/ca.crt both written correctly to STATE"
 
 # --- verify the partition table matches image/disk/assemble.sh's own
 # convention exactly, independent of go-diskfs's own view of what it

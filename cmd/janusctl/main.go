@@ -113,7 +113,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE  upload a PEM cert+key bundle as NAME, optionally binding it into crt-list PATH")
 	fmt.Fprintln(os.Stderr, "  haproxy cert-delete [-crt-list PATH] NAME  delete a certificate (unbinding from crt-list PATH first if given)")
 	fmt.Fprintln(os.Stderr, "  pki generate-client-config [-role os:admin|os:reader] DIR  issue a new client certificate, write ca.crt/client.crt/client.key to DIR")
-	fmt.Fprintln(os.Stderr, "  lifecycle install [-sha256 HEX] DISK BUNDLE_DIR  partition a blank DISK from scratch and write a release bundle (image/release/assemble.sh) to both A/B slots - does not reboot anything")
+	fmt.Fprintln(os.Stderr, "  lifecycle install [-sha256 HEX] [-controller-address HOST:PORT -controller-ca FILE] DISK BUNDLE_DIR  partition a blank DISK from scratch and write a release bundle (image/release/assemble.sh) to both A/B slots - does not reboot anything; -controller-address/-controller-ca make the installed node self-register with that Controller on first boot")
 	fmt.Fprintln(os.Stderr, "  lifecycle rollback         switch the ESP to the other A/B slot's staged UKI and reboot into it")
 	fmt.Fprintln(os.Stderr, "  lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR  write a release bundle (image/release/assemble.sh) to the inactive slot, switch, and reboot into it - with -wait-for-health, reverts and reboots back automatically if the new slot never stays up long enough to confirm healthy")
 }
@@ -253,9 +253,11 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 	case "install":
 		fs := flag.NewFlagSet("lifecycle install", flag.ExitOnError)
 		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
+		controllerAddress := fs.String("controller-address", "", "address of a Controller (Janus Controller's node self-registration port, see dashboard/backend/register.go) for the installed node to announce itself to on first boot - if unset, the node never self-registers. Requires -controller-ca.")
+		controllerCA := fs.String("controller-ca", "", "path to the Controller's CA certificate (PEM) - the installed node uses this to verify it's talking to the real Controller before ever sending it a credential; required whenever -controller-address is set")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 2 {
-			fmt.Fprintln(os.Stderr, "usage: janusctl lifecycle install [-sha256 HEX] DISK BUNDLE_DIR")
+			fmt.Fprintln(os.Stderr, "usage: janusctl lifecycle install [-sha256 HEX] [-controller-address HOST:PORT -controller-ca FILE] DISK BUNDLE_DIR")
 			os.Exit(2)
 		}
 		disk, bundleDir := fs.Arg(0), fs.Arg(1)
@@ -265,6 +267,17 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 				sum = strings.TrimSpace(string(data))
 			}
 		}
+		var controllerCACert []byte
+		if *controllerAddress != "" {
+			if *controllerCA == "" {
+				log.Fatalf("Install: -controller-ca is required whenever -controller-address is set")
+			}
+			data, err := os.ReadFile(*controllerCA)
+			if err != nil {
+				log.Fatalf("Install: read -controller-ca %s: %v", *controllerCA, err)
+			}
+			controllerCACert = data
+		}
 
 		// Longer than Upgrade's own 60s - Install writes the full
 		// rootfs to *both* A/B slots plus builds the ESP and STATE
@@ -273,8 +286,10 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 		stream, err := janusv1alpha1.NewLifecycleServiceClient(conn).Install(c, &janusv1alpha1.InstallRequest{
-			Source: &janusv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
-			Disk:   disk,
+			Source:            &janusv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+			Disk:              disk,
+			ControllerAddress: *controllerAddress,
+			ControllerCaCert:  controllerCACert,
 		})
 		if err != nil {
 			log.Fatalf("Install: %v", err)

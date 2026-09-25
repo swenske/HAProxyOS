@@ -83,9 +83,20 @@ type InstallRequest struct {
 	// itself booted from (rejected if it is; that's Upgrade's territory).
 	// Fails if the disk already has a Janus install (use
 	// Rollback/Upgrade instead).
-	Disk          string `protobuf:"bytes,2,opt,name=disk,proto3" json:"disk,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Disk string `protobuf:"bytes,2,opt,name=disk,proto3" json:"disk,omitempty"`
+	// Optional: a Controller for the freshly-installed node to
+	// self-register with on first boot (see docs/architecture.md's node
+	// self-registration design). Written onto the new STATE filesystem's
+	// controller/ directory, read back by janusd at boot - if left
+	// unset, the installed node never announces itself anywhere, same as
+	// every install before this field existed. controller_ca_cert must
+	// be set whenever controller_address is: the node has to already
+	// know which CA to trust before it ever dials the Controller - there
+	// is deliberately no trust-on-first-use fallback.
+	ControllerAddress string `protobuf:"bytes,3,opt,name=controller_address,json=controllerAddress,proto3" json:"controller_address,omitempty"`
+	ControllerCaCert  []byte `protobuf:"bytes,4,opt,name=controller_ca_cert,json=controllerCaCert,proto3" json:"controller_ca_cert,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *InstallRequest) Reset() {
@@ -130,6 +141,20 @@ func (x *InstallRequest) GetDisk() string {
 		return x.Disk
 	}
 	return ""
+}
+
+func (x *InstallRequest) GetControllerAddress() string {
+	if x != nil {
+		return x.ControllerAddress
+	}
+	return ""
+}
+
+func (x *InstallRequest) GetControllerCaCert() []byte {
+	if x != nil {
+		return x.ControllerCaCert
+	}
+	return nil
 }
 
 type InstallResponse struct {
@@ -373,10 +398,12 @@ const file_janus_v1alpha1_lifecycle_proto_rawDesc = "" +
 	"\x1ejanus/v1alpha1/lifecycle.proto\x12\x0ejanus.v1alpha1\x1a\x1bgoogle/protobuf/empty.proto\"C\n" +
 	"\vImageSource\x12\x1c\n" +
 	"\treference\x18\x01 \x01(\tR\treference\x12\x16\n" +
-	"\x06sha256\x18\x02 \x01(\tR\x06sha256\"Y\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\"\xb6\x01\n" +
 	"\x0eInstallRequest\x123\n" +
 	"\x06source\x18\x01 \x01(\v2\x1b.janus.v1alpha1.ImageSourceR\x06source\x12\x12\n" +
-	"\x04disk\x18\x02 \x01(\tR\x04disk\"]\n" +
+	"\x04disk\x18\x02 \x01(\tR\x04disk\x12-\n" +
+	"\x12controller_address\x18\x03 \x01(\tR\x11controllerAddress\x12,\n" +
+	"\x12controller_ca_cert\x18\x04 \x01(\fR\x10controllerCaCert\"]\n" +
 	"\x0fInstallResponse\x12\x14\n" +
 	"\x05stage\x18\x01 \x01(\tR\x05stage\x12\x1a\n" +
 	"\bprogress\x18\x02 \x01(\x01R\bprogress\x12\x18\n" +
