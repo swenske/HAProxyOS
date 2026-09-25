@@ -70,7 +70,7 @@ button.danger {
   white-space: pre-wrap;
 }
 
-form.add-node {
+.add-node {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem;
@@ -79,38 +79,44 @@ form.add-node {
   gap: 0.75rem;
 }
 
-form.add-node label {
+.add-node summary {
+  cursor: pointer;
+  font-size: 1.17em;
+  font-weight: bold;
+}
+
+.add-node label {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
   font-size: 0.9rem;
 }
 
-form.add-node .mode-toggle {
+.add-node .mode-toggle {
   display: flex;
   gap: 1.5rem;
   font-size: 0.85rem;
 }
 
-form.add-node .mode-toggle label {
+.add-node .mode-toggle label {
   flex-direction: row;
   align-items: center;
   gap: 0.4rem;
 }
 
-form.add-node .hint {
+.add-node .hint {
   font-size: 0.8rem;
   opacity: 0.7;
   font-weight: normal;
 }
 
-form.add-node input,
-form.add-node textarea {
+.add-node input,
+.add-node textarea {
   font-family: ui-monospace, monospace;
   font-size: 0.85rem;
   padding: 0.4rem;
 }
 
-form.add-node button {
+.add-node button {
   align-self: flex-start;
 }

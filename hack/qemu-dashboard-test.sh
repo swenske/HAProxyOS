@@ -137,6 +137,15 @@
 #      to force the failure, confirming no orphan after the failed
 #      attempt, then freeing the port and confirming a clean retry)
 #      before encoding it here.
+#   13. Point 2 suite, tranche 6: GET /api/controller-info (auth-gated
+#      like everything else under /api/) - what an operator needs to
+#      fill in janusctl lifecycle install's own -controller-address/
+#      -controller-ca flags for a new node. Checks the gate itself and
+#      that the returned CA certificate is a real, parseable
+#      certificate (the dashboard's own TLS identity) - not the
+#      suggested address's exact value, which depends on this test
+#      host's own network interfaces (see suggestRegisterAddress's own
+#      doc comment).
 #
 # Usage: hack/qemu-dashboard-test.sh <disk.img> <dashboardd-bin>
 set -euo pipefail
@@ -239,6 +248,24 @@ setup_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "h
 second_setup_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
 [ "$second_setup_code" = "400" ] || { echo "Dashboard test FAILED: a second setup call should be refused, got $second_setup_code" >&2; exit 1; }
 echo "Auth OK: /api/nodes refused with no session, setup validated (short password, second-setup refusal), session cookie established"
+
+# --- Point 2 suite, tranche 6: GET /api/controller-info hands an
+# operator what janusctl lifecycle install's own -controller-address/
+# -controller-ca flags need - auth-gated like everything else under
+# /api/, and its CA cert must be a real, parseable certificate (the
+# dashboard's own TLS identity, see loadOrCreateDashboardIdentity). No
+# -advertise-address is set for this dashboardd instance, so the
+# address field is whatever suggestRegisterAddress's own pki.LocalIPs()
+# fallback finds on this host (or empty, if that's empty too) - not
+# asserted on exactly, just that the endpoint itself is well-formed and
+# gated. ---
+unauth_controller_info_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/controller-info")"
+[ "$unauth_controller_info_code" = "401" ] || { echo "Dashboard test FAILED: /api/controller-info with no session should be 401, got $unauth_controller_info_code" >&2; exit 1; }
+
+CONTROLLER_INFO="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/controller-info")"
+CONTROLLER_INFO_CA="$(echo "$CONTROLLER_INFO" | python3 -c 'import json,sys; print(json.load(sys.stdin)["ca_cert_pem"])')"
+echo "$CONTROLLER_INFO_CA" | openssl x509 -noout -subject >/dev/null 2>&1 || { echo "Dashboard test FAILED: /api/controller-info's ca_cert_pem isn't a real, parseable certificate: $CONTROLLER_INFO" >&2; exit 1; }
+echo "Controller-info OK: gated like the rest of /api/, ca_cert_pem is a real certificate: $CONTROLLER_INFO"
 
 # --- Point 2 suite, tranche 2: node self-registration (dashboard/backend/
 # internal/pending + register.go) - a synthetic node CA + service

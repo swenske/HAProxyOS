@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 // dashboardd serves this SPA and the /api/nodes REST API on the same
 // origin (its own -addr, e.g. :8080) - see dashboard/backend/main.go -
@@ -92,6 +92,90 @@ function PendingList({ pending, onApprove, onReject, busy }) {
         </tbody>
       </table>
     </>
+  )
+}
+
+// copyToClipboard tries the Clipboard API first - unavailable in a
+// non-secure context (this SPA's own :8080 port is plain HTTP by
+// design, see dashboard/backend/main.go's own package doc comment, and
+// browsers only expose navigator.clipboard on https:// or localhost) -
+// and falls back to selecting the given textarea/input's text so the
+// user can still copy it with Ctrl+C/Cmd+C manually.
+async function copyToClipboard(ref) {
+  const text = ref.current?.value ?? ''
+  try {
+    if (navigator.clipboard) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // fall through to the select-and-let-the-user-copy fallback below
+  }
+  ref.current?.select()
+  return false
+}
+
+// ProvisionInfo surfaces what an operator needs to provision a new node
+// with this Controller (`janusctl lifecycle install`'s own
+// -controller-address/-controller-ca flags, see cmd/janusctl's usage) -
+// GET /api/controller-info returns this dashboard's own suggested
+// address (best-effort, see suggestRegisterAddress's own doc comment
+// server-side - always worth double-checking against the real network
+// before use) and its TLS identity CA cert (the same one a provisioned
+// node verifies before ever sending it anything - no trust-on-first-use).
+function ProvisionInfo() {
+  const [info, setInfo] = useState(null)
+  const [error, setError] = useState(null)
+  const [copied, setCopied] = useState('')
+  const addressRef = useRef(null)
+  const caRef = useRef(null)
+  const commandRef = useRef(null)
+
+  useEffect(() => {
+    fetch('/api/controller-info')
+      .then((resp) => {
+        if (!resp.ok) throw new Error('failed to load')
+        return resp.json()
+      })
+      .then(setInfo)
+      .catch((err) => setError(err.message))
+  }, [])
+
+  if (error || !info) return null
+
+  const address = info.address || 'YOUR-CONTROLLER-ADDRESS'
+  const command = `janusctl lifecycle install -controller-address ${address} -controller-ca controller-ca.crt DISK BUNDLE_DIR`
+
+  async function copy(ref, label) {
+    const ok = await copyToClipboard(ref)
+    setCopied(ok ? `${label} copied` : `select the ${label.toLowerCase()} text and press Ctrl+C/Cmd+C`)
+    setTimeout(() => setCopied(''), 4000)
+  }
+
+  return (
+    <details className="add-node">
+      <summary>Provision a new node</summary>
+      {!info.address && (
+        <p className="hint">
+          No address could be guessed automatically - set -advertise-address on dashboardd, or
+          just fill one in below yourself before copying the command.
+        </p>
+      )}
+      <label>
+        Controller address
+        <input ref={addressRef} readOnly value={address} onClick={() => copy(addressRef, 'Address')} />
+      </label>
+      <label>
+        Controller CA certificate
+        <textarea ref={caRef} readOnly rows={6} value={info.ca_cert_pem} onClick={() => copy(caRef, 'CA certificate')} />
+      </label>
+      <label>
+        Command (fill in DISK and BUNDLE_DIR, and save the CA certificate above as
+        controller-ca.crt first)
+        <textarea ref={commandRef} readOnly rows={2} value={command} onClick={() => copy(commandRef, 'Command')} />
+      </label>
+      {copied && <p className="hint">{copied}</p>}
+    </details>
   )
 }
 
@@ -461,6 +545,7 @@ function MainApp() {
       <h2>Nodes</h2>
       {loading ? <p>Loading…</p> : <NodeList nodes={nodes} onRemove={remove} busy={busy} />}
       <AddNodeForm onAdded={refresh} />
+      <ProvisionInfo />
     </main>
   )
 }

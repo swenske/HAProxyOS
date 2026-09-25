@@ -112,6 +112,18 @@ call `GenerateClientConfiguration` and obtain a fresh service
 credential for the dashboard's own use - it is never written to disk
 itself (see the architecture note above).
 
+A node can also register itself with this Controller automatically at
+first boot instead, if it was provisioned with `janusctl lifecycle
+install`'s `-controller-address`/`-controller-ca` flags - it then shows
+up in a "pending" queue for you to approve or reject, rather than being
+added by hand. The "Provision a new node" panel in the UI has the exact
+address/CA certificate/command to use for this, pre-filled from this
+Controller's own configuration (double-check the suggested address
+against your real network before using it - this process can't always
+tell what address a node will actually be able to reach it at, most
+notably under Docker bridge networking, see the `-advertise-address`
+note above).
+
 ## Build (backend only, no image)
 
 For local development without Docker:

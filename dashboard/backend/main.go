@@ -98,7 +98,14 @@ func main() {
 		log.Fatalf("dashboard TLS identity: %v", err)
 	}
 
-	app := &app{store: st, pending: pendingStore, auth: authStore, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
+	app := &app{
+		store:                 st,
+		pending:               pendingStore,
+		auth:                  authStore,
+		serverCert:            serverCert,
+		listeners:             map[string]*nodeproxy.Listener{},
+		suggestedRegisterAddr: suggestRegisterAddress(*advertiseAddresses, *registerAddr),
+	}
 	for _, n := range st.List() {
 		if err := app.startListener(n); err != nil {
 			// A node whose listener fails to start (e.g. its port is
@@ -127,6 +134,7 @@ func main() {
 	mux.HandleFunc("/api/nodes/", app.requireAuth(app.handleNode))
 	mux.HandleFunc("/api/pending", app.requireAuth(app.handlePendingList))
 	mux.HandleFunc("/api/pending/", app.requireAuth(app.handlePendingAction))
+	mux.HandleFunc("/api/controller-info", app.requireAuth(app.handleControllerInfo))
 	mux.Handle("/", http.FileServerFS(spa))
 
 	log.Printf("dashboardd listening on %s", *addr)
@@ -138,6 +146,13 @@ type app struct {
 	pending    *pending.Store
 	auth       *auth.Store
 	serverCert tls.Certificate
+	// suggestedRegisterAddr is handleControllerInfo's best guess at the
+	// address a node should be given as -controller-address at
+	// provisioning time - see suggestRegisterAddress's own doc comment.
+	// Empty when nothing suitable could be determined; the UI/operator
+	// still has to confirm or override it for their actual network
+	// either way, this is a convenience default, never authoritative.
+	suggestedRegisterAddr string
 
 	mu        sync.Mutex
 	listeners map[string]*nodeproxy.Listener
@@ -439,6 +454,63 @@ func loadOrCreateDashboardIdentity(dataDir, extraAdvertiseAddresses string) (tls
 		return tls.Certificate{}, fmt.Errorf("write %s: %w", keyPath, err)
 	}
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// suggestRegisterAddress guesses the address a newly-provisioned node
+// should be given as -controller-address (see cmd/janusctl's own
+// lifecycle install flags) - the same host-selection logic
+// loadOrCreateDashboardIdentity's SAN list already applies (prefer an
+// explicitly configured -advertise-address, since this process can't
+// reliably know its own externally-reachable address otherwise - see
+// that function's own doc comment for why), paired with -register-addr's
+// port. Best-effort only, and always presented as a suggestion the
+// operator has to confirm for their actual network (handleControllerInfo
+// returns it as-is, never silently substituted into anything that acts
+// on it) - an empty result just means neither -advertise-address nor
+// this host's own local interfaces yielded anything usable, not an
+// error.
+func suggestRegisterAddress(extraAdvertiseAddresses, registerAddr string) string {
+	host := ""
+	for _, entry := range strings.Split(extraAdvertiseAddresses, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry != "" {
+			host = entry
+			break
+		}
+	}
+	if host == "" {
+		if ips := pki.LocalIPs(); len(ips) > 0 {
+			host = ips[0].String()
+		}
+	}
+	if host == "" {
+		return ""
+	}
+	_, port, err := net.SplitHostPort(registerAddr)
+	if err != nil || port == "" {
+		return ""
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// handleControllerInfo hands an operator everything needed to fill in
+// `janusctl lifecycle install`'s -controller-address/-controller-ca
+// flags for a new node - see docs/architecture.md's node self-
+// registration design. The CA cert here is this dashboard's own TLS
+// identity (the same one startRegistrationListener serves /register
+// behind), not a separate credential - it's what a provisioned node
+// verifies the Controller's identity against before ever sending it
+// anything, matching InstallRequest's own "no trust-on-first-use" rule.
+func (a *app) handleControllerInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: a.serverCert.Certificate[0]})
+	writeJSON(w, http.StatusOK, struct {
+		Address   string `json:"address"`
+		CACertPEM string `json:"ca_cert_pem"`
+	}{Address: a.suggestedRegisterAddr, CACertPEM: string(caPEM)})
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
