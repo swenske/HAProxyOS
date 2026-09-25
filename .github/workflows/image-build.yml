@@ -596,6 +596,19 @@ jobs:
       - name: LifecycleService.Install partitions a blank disk from scratch for real (Phase 3 cont'd)
         run: make lifecycle-install-test
 
+      # Point 2 suite, tranche 5: proves a node provisioned with a
+      # Controller at Install time (controller_address/
+      # controller_ca_cert, tranche 4) genuinely self-registers with a
+      # real, running dashboardd on its own first boot - no RPC call
+      # from the test drives the registration itself, only cmd/janusd's
+      # own background selfRegisterIfConfigured. See hack/
+      # qemu-self-register-test.sh's own header comment for the full
+      # flow and the two real bugs (a missing janusd_t SELinux
+      # udp_socket rule, and a dashboard TLS identity SAN gap under
+      # Docker bridge networking) this test itself found.
+      - name: janusd self-registers with a Controller on first boot (Point 2 suite tranche 5)
+        run: make qemu-self-register-test
+
       # Phase 3 cont'd: real Secure Boot key management - no HSM in this
       # project's threat model (single maintainer, self-hosted CI), so
       # the simplest thing that's still meaningfully safer than
