@@ -116,6 +116,20 @@ jobs:
           # (rootfs/base/etc/haproxy/haproxy.cfg) hardcodes
           # /run/haproxyos/haproxy-admin.sock and must match whatever
           # haproxyosd is told to look for.
+          #
+          # /etc/haproxyos/pki specifically gets wiped first, not just
+          # mkdir -p'd: haproxyos-runner01 is a persistent self-hosted
+          # runner, so a previous run's already-bootstrapped PKI
+          # survives on disk between workflow runs (unlike a GitHub-
+          # hosted ephemeral runner) - LoadOrBootstrap only regenerates
+          # when the dir is empty, so stale material here silently gets
+          # reused instead of this step's own "first boot" actually
+          # happening. Caught for real switching internal/pki from
+          # Ed25519 to ECDSA: an old Ed25519 CA left over from a prior
+          # run failed to load under the new code with "CA key is not
+          # ECDSA", not a missing-cleanup problem visible until the key
+          # algorithm itself changed.
+          sudo rm -rf /etc/haproxyos/pki
           sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
           sudo cp rootfs/base/etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg
           # chroot /var/empty is in that config now - the chroot() syscall
@@ -206,6 +220,11 @@ jobs:
               http-request return status 200 content-type text/plain string "tls-up\n"
           EOF
 
+          # Same reasoning as the gRPC integration test step above: this
+          # step's own -pki-dir (pki-rt, deliberately separate from that
+          # step's /etc/haproxyos/pki) can equally carry stale material
+          # from a previous run on this persistent runner.
+          sudo rm -rf /etc/haproxyos/pki-rt
           sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
           sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy /etc/haproxyos
           sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
