@@ -18,6 +18,21 @@ h1 {
   font-size: 1.5rem;
 }
 
+.header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1rem;
+}
+
+.header-row h1 {
+  margin: 0;
+}
+
+.auth-screen {
+  max-width: 420px;
+}
+
 table.nodes {
   width: 100%;
   border-collapse: collapse;

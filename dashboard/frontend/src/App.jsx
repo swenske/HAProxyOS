@@ -204,7 +204,137 @@ function AddNodeForm({ onAdded }) {
   )
 }
 
-export default function App() {
+// SetupForm is forced on the very first visit, before anything else in
+// the app is reachable (see dashboard/backend/internal/auth's own doc
+// comment) - a single admin password, no username, since this is a
+// single-operator tool.
+function SetupForm({ onDone }) {
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function submit(e) {
+    e.preventDefault()
+    if (password !== confirm) {
+      setError('passwords do not match')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const resp = await fetch('/api/auth/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      onDone()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main className="auth-screen">
+      <h1>Janus Controller</h1>
+      <form className="add-node" onSubmit={submit}>
+        <h2>Set the admin password</h2>
+        <p className="hint">
+          First run - choose a password for this Controller. There is one admin account.
+        </p>
+        <label>
+          Password (at least 8 characters)
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={8} autoFocus />
+        </label>
+        <label>
+          Confirm password
+          <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required minLength={8} />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <button type="submit" disabled={busy}>
+          {busy ? 'Setting up…' : 'Set password and continue'}
+        </button>
+      </form>
+    </main>
+  )
+}
+
+function LoginForm({ onDone }) {
+  const [password, setPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(null)
+
+  async function submit(e) {
+    e.preventDefault()
+    setBusy(true)
+    setError(null)
+    try {
+      const resp = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password }),
+      })
+      if (!resp.ok) throw new Error(await resp.text())
+      onDone()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <main className="auth-screen">
+      <h1>Janus Controller</h1>
+      <form className="add-node" onSubmit={submit}>
+        <h2>Sign in</h2>
+        <label>
+          Password
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required autoFocus />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <button type="submit" disabled={busy}>
+          {busy ? 'Signing in…' : 'Sign in'}
+        </button>
+      </form>
+    </main>
+  )
+}
+
+// AuthGate calls /api/auth/status once on load and renders whichever
+// screen that says to - the setup form, the login form, or the real
+// app (children). Re-checked after a successful setup/login rather
+// than just trusting the client-side action, since that's what the
+// server itself decided, not a local assumption.
+function AuthGate({ children }) {
+  const [status, setStatus] = useState(null) // null while loading
+  const [error, setError] = useState(null)
+
+  async function refreshStatus() {
+    try {
+      const resp = await fetch('/api/auth/status')
+      if (!resp.ok) throw new Error(await resp.text())
+      setStatus(await resp.json())
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  useEffect(() => {
+    refreshStatus()
+  }, [])
+
+  if (error) return <p className="error">{error}</p>
+  if (!status) return <p>Loading…</p>
+  if (status.setup_required) return <SetupForm onDone={refreshStatus} />
+  if (!status.authenticated) return <LoginForm onDone={refreshStatus} />
+  return children
+}
+
+function MainApp() {
   const [nodes, setNodes] = useState([])
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -242,12 +372,31 @@ export default function App() {
     }
   }
 
+  async function logout() {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    // A full reload is simplest here: AuthGate's own state doesn't
+    // otherwise know a logout just happened, and a reload re-runs its
+    // status check from scratch.
+    window.location.reload()
+  }
+
   return (
     <main>
-      <h1>Janus Controller</h1>
+      <div className="header-row">
+        <h1>Janus Controller</h1>
+        <button onClick={logout}>Log out</button>
+      </div>
       {error && <p className="error">{error}</p>}
       {loading ? <p>Loading…</p> : <NodeList nodes={nodes} onRemove={remove} busy={busy} />}
       <AddNodeForm onAdded={refresh} />
     </main>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthGate>
+      <MainApp />
+    </AuthGate>
   )
 }

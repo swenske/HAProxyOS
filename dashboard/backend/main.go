@@ -1,12 +1,15 @@
 // Command dashboardd is the management dashboard's backend - see the
 // rebranding/dashboard/client-native plan for the full architecture.
 // Serves the SPA + a REST/JSON API for managing the node registry on one
-// plain HTTP port (nothing sensitive transits there - just names/
-// addresses, never a credential), and one dedicated HTTPS listener per
-// registered node (see dashboard/backend/internal/nodeproxy) requiring a
-// TLS client certificate signed by that node's own CA - a browser
-// already holding a valid client cert for that node gets prompted to
-// select it the first time it connects to that node's own port.
+// plain HTTP port (behind a single admin password - see internal/auth -
+// forced setup on first run, session-cookie-gated after that; this port
+// still isn't TLS-protected in transit, a known, documented limitation
+// rather than a hidden one - see internal/auth's own doc comment), and
+// one dedicated HTTPS listener per registered node (see dashboard/
+// backend/internal/nodeproxy) requiring a TLS client certificate signed
+// by that node's own CA - a browser already holding a valid client cert
+// for that node gets prompted to select it the first time it connects
+// to that node's own port.
 package main
 
 import (
@@ -35,6 +38,7 @@ import (
 	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
 	"github.com/swenske/Janus/internal/pki"
 
+	"github.com/swenske/Janus/dashboard/backend/internal/auth"
 	"github.com/swenske/Janus/dashboard/backend/internal/nodeproxy"
 	"github.com/swenske/Janus/dashboard/backend/internal/store"
 )
@@ -73,12 +77,20 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 
+	authStore, err := auth.Open(*dataDir)
+	if err != nil {
+		log.Fatalf("open auth store: %v", err)
+	}
+	if authStore.SetupRequired() {
+		log.Printf("no admin password set yet - the UI will force a one-time setup screen on first visit")
+	}
+
 	serverCert, err := loadOrCreateDashboardIdentity(*dataDir)
 	if err != nil {
 		log.Fatalf("dashboard TLS identity: %v", err)
 	}
 
-	app := &app{store: st, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
+	app := &app{store: st, auth: authStore, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
 	for _, n := range st.List() {
 		if err := app.startListener(n); err != nil {
 			// A node whose listener fails to start (e.g. its port is
@@ -95,8 +107,12 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/nodes", app.handleNodes)
-	mux.HandleFunc("/api/nodes/", app.handleNode)
+	mux.HandleFunc("/api/auth/status", app.handleAuthStatus)
+	mux.HandleFunc("/api/auth/setup", app.handleAuthSetup)
+	mux.HandleFunc("/api/auth/login", app.handleAuthLogin)
+	mux.HandleFunc("/api/auth/logout", app.handleAuthLogout)
+	mux.HandleFunc("/api/nodes", app.requireAuth(app.handleNodes))
+	mux.HandleFunc("/api/nodes/", app.requireAuth(app.handleNode))
 	mux.Handle("/", http.FileServerFS(spa))
 
 	log.Printf("dashboardd listening on %s", *addr)
@@ -105,6 +121,7 @@ func main() {
 
 type app struct {
 	store      *store.Store
+	auth       *auth.Store
 	serverCert tls.Certificate
 
 	mu        sync.Mutex

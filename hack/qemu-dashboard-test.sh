@@ -90,6 +90,15 @@
 #      without needing to re-add anything - the whole point of
 #      persisting to disk rather than keeping the registry in memory
 #      only.
+#   10. tranche 7: the main port's own admin auth (dashboard/backend/
+#      internal/auth) - confirmed via a real cookie jar throughout this
+#      whole script (every /api/nodes* call needs it, matching what the
+#      real UI now enforces): /api/nodes with no session at all must be
+#      refused (401), a first-run setup call establishes the one admin
+#      password and logs the caller in via the returned session cookie,
+#      and - after the dashboardd restart in step 9, since sessions are
+#      deliberately in-memory-only and don't survive a restart - a fresh
+#      login call is needed before the registry is reachable again.
 #
 # Usage: hack/qemu-dashboard-test.sh <disk.img> <dashboardd-bin>
 set -euo pipefail
@@ -173,6 +182,25 @@ MAIN_UI="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/")"
 echo "$MAIN_UI" | grep -q '<div id="root">' || { echo "Dashboard test FAILED: main SPA index.html not served at /: $MAIN_UI" >&2; exit 1; }
 echo "Main SPA OK: dashboard/frontend's built index.html is served at /"
 
+# --- tranche 7: admin auth gates everything under /api/nodes* now -
+# confirm the gate itself before doing anything it would block ---
+COOKIE_JAR="$WORKDIR/cookies.txt"
+unauth_code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+[ "$unauth_code" = "401" ] || { echo "Dashboard test FAILED: /api/nodes with no session should be 401, got $unauth_code" >&2; exit 1; }
+
+AUTH_STATUS="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/status")"
+echo "$AUTH_STATUS" | grep -q '"setup_required":true' || { echo "Dashboard test FAILED: a fresh data dir should report setup_required, got: $AUTH_STATUS" >&2; exit 1; }
+
+short_pw_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"short"}')"
+[ "$short_pw_code" = "400" ] || { echo "Dashboard test FAILED: a too-short setup password should be refused with 400, got $short_pw_code" >&2; exit 1; }
+
+setup_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
+[ "$setup_code" = "204" ] || { echo "Dashboard test FAILED: first-run setup should return 204, got $setup_code" >&2; exit 1; }
+
+second_setup_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
+[ "$second_setup_code" = "400" ] || { echo "Dashboard test FAILED: a second setup call should be refused, got $second_setup_code" >&2; exit 1; }
+echo "Auth OK: /api/nodes refused with no session, setup validated (short password, second-setup refusal), session cookie established"
+
 # --- add-node via .pfx upload (the frontend's default mode as of
 # tranche 6 - see dashboard/backend/main.go's parseAddNodeRequest and
 # dashboard/frontend/src/App.jsx's AddNodeForm) - a real .pfx built the
@@ -186,22 +214,22 @@ echo "Main SPA OK: dashboard/frontend's built index.html is served at /"
 # error paths: a wrong password, and a .pfx missing the bundled CA.
 openssl pkcs12 -export -inkey "$WORKDIR/admin.key" -in "$WORKDIR/admin.crt" \
   -certfile "$WORKDIR/ca.crt" -out "$WORKDIR/admin.pfx" -passout pass:dashboard-test-pfx >/dev/null 2>&1
-PFX_ADD_RESP="$(curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+PFX_ADD_RESP="$(curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
   -F "name=pfx-test-node" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
   -F "pfx_password=dashboard-test-pfx" -F "pfx=@$WORKDIR/admin.pfx;type=application/x-pkcs12")"
 PFX_NODE_ID="$(echo "$PFX_ADD_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)"
 [ -n "$PFX_NODE_ID" ] || { echo "Dashboard test FAILED: .pfx add-node didn't return an id: $PFX_ADD_RESP" >&2; exit 1; }
-curl -s -X DELETE "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${PFX_NODE_ID}" >/dev/null
+curl -s -b "$COOKIE_JAR" -X DELETE "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${PFX_NODE_ID}" >/dev/null
 echo "Add-node via .pfx OK: $PFX_ADD_RESP"
 
-WRONG_PW_RESP="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+WRONG_PW_RESP="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
   -F "name=wrong-pw" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
   -F "pfx_password=not-the-password" -F "pfx=@$WORKDIR/admin.pfx;type=application/x-pkcs12")"
 [ "$WRONG_PW_RESP" = "400" ] || { echo "Dashboard test FAILED: wrong .pfx password should return 400, got $WRONG_PW_RESP" >&2; exit 1; }
 
 openssl pkcs12 -export -inkey "$WORKDIR/admin.key" -in "$WORKDIR/admin.crt" \
   -out "$WORKDIR/admin-no-ca.pfx" -passout pass:dashboard-test-pfx >/dev/null 2>&1
-NO_CA_RESP="$(curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
+NO_CA_RESP="$(curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" \
   -F "name=no-ca" -F "address=127.0.0.1:${HOST_GRPC_PORT}" \
   -F "pfx_password=dashboard-test-pfx" -F "pfx=@$WORKDIR/admin-no-ca.pfx;type=application/x-pkcs12")"
 echo "$NO_CA_RESP" | grep -q "no CA certificate bundled" || { echo "Dashboard test FAILED: .pfx with no bundled CA should be refused with a clear message, got: $NO_CA_RESP" >&2; exit 1; }
@@ -223,7 +251,7 @@ req = {
 open(out, "w").write(json.dumps(req))
 PYEOF
 
-ADD_RESP="$(curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" -H "Content-Type: application/json" -d @"$WORKDIR/add-node.json")"
+ADD_RESP="$(curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" -H "Content-Type: application/json" -d @"$WORKDIR/add-node.json")"
 echo "add-node response: $ADD_RESP"
 NODE_ID="$(echo "$ADD_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')"
 NODE_LISTEN_PORT="$(echo "$ADD_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["port"])')"
@@ -235,7 +263,7 @@ fi
 echo "Add-node OK: id=$NODE_ID port=$NODE_LISTEN_PORT"
 
 # --- list ---
-LIST_RESP="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+LIST_RESP="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
 echo "$LIST_RESP" | grep -qF "\"id\":\"$NODE_ID\"" || { echo "Dashboard test FAILED: GET /api/nodes didn't list the registered node: $LIST_RESP" >&2; exit 1; }
 if echo "$LIST_RESP" | grep -q "bootstrap\|service"; then
   echo "Dashboard test FAILED: GET /api/nodes leaked credential material: $LIST_RESP" >&2
@@ -376,9 +404,9 @@ fi
 echo "mTLS gate OK: both no-cert and wrong-CA connections refused at the TLS handshake itself"
 
 # --- delete ---
-del_code="$(curl -s -X DELETE -o /dev/null -w '%{http_code}' "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${NODE_ID}")"
+del_code="$(curl -s -b "$COOKIE_JAR" -X DELETE -o /dev/null -w '%{http_code}' "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes/${NODE_ID}")"
 [ "$del_code" = "204" ] || { echo "Dashboard test FAILED: DELETE returned $del_code, want 204" >&2; exit 1; }
-LIST_AFTER_DELETE="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+LIST_AFTER_DELETE="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
 if echo "$LIST_AFTER_DELETE" | grep -qF "\"id\":\"$NODE_ID\""; then
   echo "Dashboard test FAILED: node still listed after DELETE: $LIST_AFTER_DELETE" >&2
   exit 1
@@ -388,13 +416,25 @@ after_delete_code="$(curl -sk -o /dev/null -w '%{http_code}' -m 3 --cert "$WORKD
 echo "Delete OK: node unregistered, its listener stopped accepting connections entirely"
 
 # --- persistence across a restart ---
-curl -s -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" -H "Content-Type: application/json" -d @"$WORKDIR/add-node.json" > /dev/null
+curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" -H "Content-Type: application/json" -d @"$WORKDIR/add-node.json" > /dev/null
 kill "$DASHBOARD_PID"
 wait "$DASHBOARD_PID" 2>/dev/null || true
 "$DASHBOARDD" -addr ":${DASHBOARD_ADDR_PORT}" -data-dir "$WORKDIR/data" > "$WORKDIR/dashboardd-restart.log" 2>&1 &
 DASHBOARD_PID=$!
 sleep 1
-RESTART_LIST="$(curl -s "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+
+# Sessions are deliberately in-memory only (internal/auth's own doc
+# comment) - they don't survive a restart, so the old cookie must now
+# be rejected, and a fresh login is needed before the registry is
+# reachable again. The admin password itself (auth.json, on disk) does
+# survive, same as the node registry.
+stale_session_code="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
+[ "$stale_session_code" = "401" ] || { echo "Dashboard test FAILED: a pre-restart session should not survive dashboardd restarting, got $stale_session_code" >&2; exit 1; }
+relogin_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/login" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
+[ "$relogin_code" = "204" ] || { echo "Dashboard test FAILED: re-login after restart with the same (persisted) password should succeed, got $relogin_code" >&2; exit 1; }
+echo "Auth persistence OK: the admin password survives a restart, the session doesn't - a fresh login is required"
+
+RESTART_LIST="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
 echo "$RESTART_LIST" | grep -q '"name":"test-node"' || { echo "Dashboard test FAILED: node registry didn't survive a restart: $RESTART_LIST" >&2; cat "$WORKDIR/dashboardd-restart.log" >&2; exit 1; }
 RESTART_PORT="$(echo "$RESTART_LIST" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["port"])')"
 restart_relay_code="$(curl -sk -o /dev/null -w '%{http_code}' --cert "$WORKDIR/admin.crt" --key "$WORKDIR/admin.key" "https://127.0.0.1:${RESTART_PORT}/api/info" || true)"
