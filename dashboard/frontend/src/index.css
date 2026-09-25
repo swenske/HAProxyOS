@@ -29,6 +29,26 @@ h1 {
   margin: 0;
 }
 
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.brand h1 {
+  margin: 0;
+}
+
+.brand.centered {
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.logo {
+  flex-shrink: 0;
+}
+
 .auth-screen {
   max-width: 420px;
 }

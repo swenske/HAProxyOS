@@ -16,6 +16,15 @@ function openNode(node) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
+// Logo reuses public/favicon.svg (brand/favicon/favicon.svg) rather
+// than a separate light/dark <picture> pair - that file already
+// self-adapts to the browser's color scheme via an embedded
+// prefers-color-scheme media query in its own <style>, so a plain
+// <img> is enough here.
+function Logo({ size = 28 }) {
+  return <img src="/favicon.svg" alt="" width={size} height={size} className="logo" />
+}
+
 function NodeList({ nodes, onRemove, busy }) {
   if (nodes.length === 0) {
     return <p className="empty">No nodes registered yet - add one below.</p>
@@ -365,7 +374,10 @@ function SetupForm({ onDone }) {
 
   return (
     <main className="auth-screen">
-      <h1>Janus Controller</h1>
+      <div className="brand centered">
+        <Logo size={48} />
+        <h1>Janus Controller</h1>
+      </div>
       <form className="add-node" onSubmit={submit}>
         <h2>Set the admin password</h2>
         <p className="hint">
@@ -414,7 +426,10 @@ function LoginForm({ onDone }) {
 
   return (
     <main className="auth-screen">
-      <h1>Janus Controller</h1>
+      <div className="brand centered">
+        <Logo size={48} />
+        <h1>Janus Controller</h1>
+      </div>
       <form className="add-node" onSubmit={submit}>
         <h2>Sign in</h2>
         <label>
@@ -537,7 +552,10 @@ function MainApp() {
   return (
     <main>
       <div className="header-row">
-        <h1>Janus Controller</h1>
+        <div className="brand">
+          <Logo />
+          <h1>Janus Controller</h1>
+        </div>
         <button onClick={logout}>Log out</button>
       </div>
       {error && <p className="error">{error}</p>}
