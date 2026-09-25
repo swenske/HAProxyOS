@@ -1,6 +1,6 @@
-# HAProxyOS — Architecture
+# Janus — Architecture
 
-HAProxyOS is an ultra-light, immutable, API-driven Linux distribution built
+Janus is an ultra-light, immutable, API-driven Linux distribution built
 from scratch (LFS-style), inspired by [Talos Linux](https://github.com/siderolabs/talos)
 but centered on HAProxy as the primary reverse-proxy/load-balancer, with
 optional network features (BGP via [bird](https://bird.network.cz/),
@@ -14,7 +14,7 @@ nftables).
 - **API-driven, no shell**: there is no SSH daemon, no interactive shell,
   no package manager on the target OS. Every operation - configuration,
   observability, upgrades - goes through the gRPC API served by
-  `haproxyosd` (see `docs/api-routes.md`).
+  `janusd` (see `docs/api-routes.md`).
 - **Minimal attack surface / minimal CVEs**: only what HAProxy (and the
   optional network features) actually need is compiled in. No unused
   kernel drivers, no unused userspace.
@@ -28,7 +28,7 @@ self-hosted GitHub Actions runner it runs on) is an ordinary Linux/Docker
 toolchain - full shell, full package manager, the works. That's normal and
 expected: it's not the thing being hardened.
 
-The *target OS* (what actually boots on a HAProxyOS node) is what has no
+The *target OS* (what actually boots on a Janus node) is what has no
 shell, no package manager, and no SSH. Nothing in the build system's own
 tooling ships into the target rootfs.
 
@@ -79,7 +79,7 @@ field (the Kubernetes client-cert-auth idiom).
 Roles are enforced, not just carried: `internal/api/authz.go`'s
 `UnaryAuthInterceptor`/`StreamAuthInterceptor` check every single RPC
 (both services are wired via `grpc.UnaryInterceptor`/
-`grpc.StreamInterceptor` in `cmd/haproxyosd`) against a static
+`grpc.StreamInterceptor` in `cmd/janusd`) against a static
 method -> required-roles table. Two roles exist: `os:admin` (everything)
 and `os:reader` (observability/status RPCs only - explicitly *not*
 `List`/`Read`/`Copy`/`Dmesg`/`Logs`/`DiskUsage`/`PacketCapture`, which
@@ -98,21 +98,21 @@ call `HAProxyService.ShowInfo` but gets `PermissionDenied` calling
 
 ## SELinux and CIS hardening
 
-- A minimal, project-specific SELinux policy module confines `haproxyosd`,
+- A minimal, project-specific SELinux policy module confines `janusd`,
   HAProxy, and the optional network daemons to exactly the syscalls/files
   they need (Phase 4) - not a stock distro policy.
 - Kernel hardening: `lockdown=confidentiality`, no loadable kernel modules
   at runtime in production builds (or a tightly restricted allow-list if
   a specific driver genuinely needs to load late), hardened sysctls baked
   into the image rather than left to runtime configuration.
-- No setuid binaries beyond what's strictly required; `haproxyosd` runs as
+- No setuid binaries beyond what's strictly required; `janusd` runs as
   the sole privileged process, dropping capabilities it doesn't need.
 
 ## The "no shell" API surface
 
 Talos replaces shell access with a fixed set of read-only, scoped gRPC
 methods (`List`, `Read`, `Copy`, `Logs`, `Dmesg`, `PacketCapture`) instead
-of arbitrary command execution. HAProxyOS follows the same approach - see
+of arbitrary command execution. Janus follows the same approach - see
 `docs/api-routes.md` for the full catalog, derived directly from Talos's
 own `machine.proto`/`lifecycle.proto` (verified against
 `siderolabs/talos` on GitHub, not reconstructed from memory).
@@ -140,12 +140,12 @@ plan - not implemented yet.
 - **Phase 0** (done): repo structure, gRPC contract, CI/CD skeleton,
   build-system placeholders.
 - **Phase 1** (boot proof done): a from-allnoconfig, 1610-line explicit
-  kernel config (`kernel/configs/haproxyos_defconfig` - no network, no
+  kernel config (`kernel/configs/janus_defconfig` - no network, no
   disk/block drivers, no ACPI, initramfs-only) boots under QEMU with
   `rootfs/init` - a plain `CGO_ENABLED=0` Go binary - as PID 1. Verified
   end-to-end via `make qemu-boot-test` (`kernel/Dockerfile`'s `build`/
   `export` stages + `hack/build-initramfs.sh` + `hack/qemu-run.sh`), both
-  locally and via the identical Docker build on `haproxyos-runner01`
+  locally and via the identical Docker build on `janus-runner01`
   (`image-build.yml`).
   Turned out **not to need `pkgs/musl-toolchain` or `pkgs/busybox` at
   all**: a statically-linked Go binary needs no libc, so there's nothing
@@ -157,15 +157,15 @@ plan - not implemented yet.
   initramfs *is* the whole rootfs for this boot-proof milestone.
 - **Phase 2** (done): HAProxy
   integration (static musl build,
-  supervised by `haproxyosd`), `HAProxyService`'s core RPCs implemented
+  supervised by `janusd`), `HAProxyService`'s core RPCs implemented
   and reachable **inside the QEMU-booted kernel itself** - the kernel
   config grew real networking (virtio-net, `CONFIG_UNIX`/`INET`, DHCP via
   kernel-builtin `IP_PNP` - no userspace network tooling needed), and
-  `rootfs/init` now supervises `haproxyosd` (which supervises `haproxy`)
+  `rootfs/init` now supervises `janusd` (which supervises `haproxy`)
   instead of just proving the boot chain. Verified with `make
   qemu-network-test`: a host port forwarded to the guest's HAProxy
   actually answers real HTTP, both locally and via `image-build.yml` on
-  `haproxyos-runner01`. mTLS is now mandatory on every connection (see
+  `janus-runner01`. mTLS is now mandatory on every connection (see
   "mTLS / PKI" above) - `credentials.NewTLS` on the gRPC server, no
   plaintext fallback, verified with a real mismatched-CA connection
   attempt being rejected (unit test + manual check) and a fresh
@@ -207,11 +207,11 @@ plan - not implemented yet.
 
   **Restart-on-crash.** `rootfs/init` no longer just reaps zombies
   forever - `rootfs/init/supervisor.go`'s `Supervisor` restarts
-  `haproxyosd` every time it exits, with a backoff that grows (capped at
+  `janusd` every time it exits, with a backoff that grows (capped at
   30s) on fast repeated crashes and resets to the 1s minimum once an
   instance has stayed up 60s (so one old crash loop doesn't leave a
   later, unrelated crash waiting the full backoff to recover). There's
-  deliberately **no give-up threshold** - `haproxyosd` is the only way to
+  deliberately **no give-up threshold** - `janusd` is the only way to
   reach a node at all (see "no shell" above), so stopping restarts after
   N failures - systemd's default - would leave the node permanently
   unmanageable with no fallback the way SSH would be for a normal box.
@@ -230,7 +230,7 @@ plan - not implemented yet.
   **HAProxy privilege drop.** The bootstrap `haproxy.cfg` now sets
   `chroot /var/empty` + numeric `uid 1000`/`gid 1000` (no `/etc/passwd`
   on this rootfs to resolve named `user`/`group` against, and HAProxy
-  doesn't need one for numeric ids). `haproxyosd` creates `/var/empty`
+  doesn't need one for numeric ids). `janusd` creates `/var/empty`
   itself (`-haproxy-chroot-dir`, mode `0000` - genuinely empty and
   inaccessible, since nothing is ever opened from inside it: every file
   HAProxy touches - config, maps, ACLs, certs, the stats socket bind - is
@@ -243,13 +243,13 @@ plan - not implemented yet.
   since all the file access those need happens pre-chroot.
   HAProxy's own metrics keep using its **built-in** Prometheus exporter
   (`internal/haproxy` just proxies the runtime socket/config, it doesn't
-  reimplement metrics export) - `internal/exporter` (HAProxyOS's own,
+  reimplement metrics export) - `internal/exporter` (Janus's own,
   system-level, built on top of the gRPC API) is explicitly **deferred
   past Phase 2**, not part of this phase.
 - **Phase 3** (build side started): real immutability - A/B, dm-verity,
   UKI, Secure Boot, `LifecycleService.Install`/`Upgrade`/`Rollback`.
   `rootfs/assemble.sh` builds a real squashfs image of the rootfs (same
-  content as Phase 2's initramfs - init, haproxyosd, static haproxy,
+  content as Phase 2's initramfs - init, janusd, static haproxy,
   bootstrap config - `-all-root` since there's no `/etc/passwd` to
   resolve any other owner against) and computes its dm-verity hash tree
   via `veritysetup format`, requiring neither step to run as root. The
@@ -310,12 +310,12 @@ plan - not implemented yet.
   a real corruption slip past a naive "did the marker print" check.
   `rootfs/init/main.go`'s `mountEphemeral` now gives the verified root a
   writable layer, entirely tmpfs-backed: `/run` and `/tmp` mounted
-  empty (nothing pre-existing there needs to survive - haproxyosd's
-  `/run/haproxyos`, HAProxy's stats socket/pid file, `Manager.Validate`'s
+  empty (nothing pre-existing there needs to survive - janusd's
+  `/run/janus`, HAProxy's stats socket/pid file, `Manager.Validate`'s
   tmpfile); `/etc` needs its bootstrap `haproxy.cfg` bytes read *before*
   the tmpfs overmount and rewritten after, since that file (unlike
   `/run`/`/tmp`) isn't empty on a freshly-booted node - this is what
-  makes both PKI bootstrap (`/etc/haproxyos/pki`) and a live
+  makes both PKI bootstrap (`/etc/janus/pki`) and a live
   `ApplyConfig` RPC (same path) actually work. `/var` is deliberately
   left alone, still squashfs-backed: the only thing under it is
   `/var/empty`, HAProxy's chroot jail, which must keep the exact
@@ -326,7 +326,7 @@ plan - not implemented yet.
   HAProxy startup, config read) genuinely works from a dm-verity-booted,
   read-only node, not just that the kernel got as far as running
   `/sbin/init`.
-  A real persistent STATE partition now backs both `/etc/haproxyos/pki`
+  A real persistent STATE partition now backs both `/etc/janus/pki`
   **and** applied HAProxy config: `rootfs/state-image.sh` pre-formats a
   small, blank ext4 image at **build time** (`mkfs.ext4` - no mkfs
   binary ships on the target, matching the "no package manager on the
@@ -339,26 +339,26 @@ plan - not implemented yet.
   boot silently regenerating a new CA every time despite `mountState`
   running, since every step past the failed `MkdirAll` just logged and
   moved on rather than aborting the boot), then bind-mounts its `pki/`
-  and `haproxy/` subdirectories over `/etc/haproxyos/pki` and
+  and `haproxy/` subdirectories over `/etc/janus/pki` and
   `/etc/haproxy` respectively. `/etc/haproxy` needs first-boot seeding
   the same way `mountEphemeral` already seeds `/etc` itself: the
   bootstrap `haproxy.cfg` bytes are copied into the persistent
   `haproxy/` subdirectory *only if it's still empty*, so a later boot
   after a real `ApplyConfig` never gets overwritten back to the
-  bootstrap default. Both `cmd/haproxyosd`'s PKI bootstrap and
+  bootstrap default. Both `cmd/janusd`'s PKI bootstrap and
   `internal/haproxy.Manager.Apply` now call `syscall.Sync()` right
   after writing, so durability doesn't depend on QEMU's own
   shutdown-time cache flush.
   Proven with a real three-boot test (`hack/qemu-state-persist-test.sh`,
   not just "the mount didn't error"), against the *same* `state.img`
-  each time: boot 1 must log haproxyosd's "first boot - generated a new
+  each time: boot 1 must log janusd's "first boot - generated a new
   CA" line (fresh bootstrap) and serve on the bootstrap default's
   `:8080`; boot 2 must not log that line again (loaded, not
   regenerated); between boot 2 and boot 3 the script directly injects a
   new `haproxy.cfg` into `state.img` via `debugfs -w` - no mount, no
   loop device, no root - bound to `:8081` instead, standing in for a
   real `ApplyConfig` RPC (a real `mount -o loop` was the first thing
-  tried here, and failed outright on `haproxyos-runner01` - an
+  tried here, and failed outright on `janus-runner01` - an
   unprivileged LXC container - with "failed to setup loop device",
   despite working fine locally; already covered elsewhere by
   `image-build.yml`'s own mTLS integration test; what's under test here
@@ -410,7 +410,7 @@ plan - not implemented yet.
   (they're deliberately kept - they cover dm-verity tamper detection
   and STATE persistence in isolation, which `qemu-ab-boot-test.sh`
   doesn't re-test). `qemu-ab-boot-test.sh` now reboots slot A a second
-  time on the same disk and confirms haproxyosd's "first boot" line
+  time on the same disk and confirms janusd's "first boot" line
   does *not* reappear - proving `resolveStateDevice` actually works in
   practice, not just via `cmdline_test.go`'s unit tests (which cover
   the parsing itself, including the real cmdline string a boot produced
@@ -498,7 +498,7 @@ plan - not implemented yet.
   real OVMF firmware with a single drive, and asserts both that the
   console's own `dm-mod.create=` line now references
   `/dev/vda4`/`/dev/vda5` (the switch actually took effect) and that
-  haproxyosd's "first boot" log line does **not** reappear (`STATE`,
+  janusd's "first boot" log line does **not** reappear (`STATE`,
   and the CA on it, genuinely survived the switch).
   `LifecycleService.Rollback` is now real too: `internal/api/
   lifecycle.go` is the gRPC front end for exactly the ESP swap
@@ -506,7 +506,7 @@ plan - not implemented yet.
   an already-booted node. The target OS has no package manager, so it
   can never shell out to `ukify` the way `activate-slot.sh` does - this
   is precisely why that script now stages **both** slots' UKIs on the
-  ESP, at fixed paths (`\HAPROXYOS\UKI-A.EFI`, `\HAPROXYOS\UKI-B.EFI`),
+  ESP, at fixed paths (`\JANUS\UKI-A.EFI`, `\JANUS\UKI-B.EFI`),
   alongside the active one (`\EFI\BOOT\BOOTX64.EFI`): at runtime,
   `Rollback` only needs to mount the ESP (`CONFIG_VFAT_FS` -
   `CONFIG_VFAT_FS=y` alone wasn't enough either, mounting failed
@@ -529,10 +529,10 @@ plan - not implemented yet.
   Proven with a real gRPC call, not just that the underlying mechanism
   works when driven directly: `hack/qemu-lifecycle-rollback-test.sh`
   boots slot A, extracts `ca.crt`/`admin.crt`/`admin.key` straight from
-  `disk.img`'s STATE partition via `debugfs` - haproxyosd prints all
-  three to the console once, on first boot (see `cmd/haproxyosd/
+  `disk.img`'s STATE partition via `debugfs` - janusd prints all
+  three to the console once, on first boot (see `cmd/janusd/
   main.go`), but a script can't watch a live console the way a real
-  operator would - calls `haproxyosctl
+  operator would - calls `janusctl
   lifecycle rollback` over real mTLS, and - this is the one boot test in
   the whole project that does **not** pass `-no-reboot` to QEMU - watches
   the guest genuinely reboot itself inside the same QEMU process and
@@ -594,12 +594,12 @@ plan - not implemented yet.
   boots slot A, builds a second rootfs with genuinely different content
   (different squashfs, different root hash), injects its release bundle
   into `disk.img`'s STATE partition via `debugfs` *before* the first
-  boot (`haproxyosctl` and `haproxyosd` don't share a filesystem across
+  boot (`janusctl` and `janusd` don't share a filesystem across
   this QEMU host/guest boundary, unlike this project's usual "share a
   filesystem" case - and writing to STATE from the host while the guest
   also has it mounted read-write would corrupt it, which is exactly why
   the injection happens before the first boot rather than concurrently
-  with a running one), then drives a real `haproxyosctl lifecycle
+  with a running one), then drives a real `janusctl lifecycle
   upgrade` call and watches the guest genuinely reboot itself into the
   new content, same `-no-reboot`-free pattern as the Rollback test.
   A real bug was found writing this test - not in `Upgrade` itself, but
@@ -626,23 +626,23 @@ plan - not implemented yet.
   back to, and (from `UpgradeRequest.health_timeout_seconds`) how long
   it gets. The *next* boot's `rootfs/init` (`checkBootCommit`) either
   gets that one confirmation attempt (decrementing the marker's
-  `tries_left` before starting `haproxyosd`, so a *subsequent* boot into
+  `tries_left` before starting `janusd`, so a *subsequent* boot into
   the same slot - if this one never confirms - finds it already
   exhausted and reverts immediately, without giving it a third try) or,
   finding tries already exhausted, reverts straight away without ever
-  starting `haproxyosd` at all this boot.
+  starting `janusd` at all this boot.
   Confirmation itself is now a *real* HAProxy-level check, not an
-  inference from process survival: `cmd/haproxyosd`, once it starts,
+  inference from process survival: `cmd/janusd`, once it starts,
   checks for a pending marker and - in the background, so it never
   delays the gRPC server coming up - polls HAProxy's own stats socket
   (`internal/haproxy.Manager.ShowInfo`) via a new
   `internal/bootcommit.Confirm` until it succeeds several times in a
   row, then clears the marker itself. If that never happens within
-  `HealthTimeoutSeconds`, `haproxyosd` reverts and reboots itself,
+  `HealthTimeoutSeconds`, `janusd` reverts and reboots itself,
   directly - no RPC, no `rootfs/init` involvement needed for this path.
   A first version of this piggybacked on `Supervisor`'s own stability
   tracking instead (a proactive `OnStable` hook, firing once the
-  `haproxyosd` *process* had merely stayed up for a while) - reused as
+  `janusd` *process* had merely stayed up for a while) - reused as
   the confirmation signal only briefly, and removed once real
   HAProxy-level confirmation landed: the two would have raced (a
   process-survival signal firing before, or after, the real health
@@ -650,8 +650,8 @@ plan - not implemented yet.
   HAProxy or double-reverting), and the weaker signal added nothing the
   stronger one didn't already cover.
   `rootfs/init`'s own `Supervisor.GiveUpAfter`/`OnGiveUp` stays, but
-  narrows to the one thing `cmd/haproxyosd`'s own check structurally
-  can't catch: `haproxyosd` crashing too fast, or too often, to ever
+  narrows to the one thing `cmd/janusd`'s own check structurally
+  can't catch: `janusd` crashing too fast, or too often, to ever
   reach the point of running its own confirmation loop at all - bounded
   *only* when a marker is pending (every other boot keeps the
   unconditional "restart forever" policy this package has always had,
@@ -660,13 +660,13 @@ plan - not implemented yet.
   a chance to act on a *later* boot, which requires the machine to
   reboot again first. The two mechanisms are complementary, each the
   *only* one that can catch its respective failure - `Supervisor` has no
-  visibility into HAProxy's health, and `haproxyosd` can't act if it
+  visibility into HAProxy's health, and `janusd` can't act if it
   never gets to run.
   Both revert paths share one `internal/bootrevert.To` helper
   (resolve the ESP device from `/proc/cmdline`, `internal/espswitch.
   Activate` the target slot, clear the marker - stopping short of the
   actual reboot, since `rootfs/init` blocks forever afterward as PID 1
-  must, while `haproxyosd` just issues one and lets the whole machine go
+  must, while `janusd` just issues one and lets the whole machine go
   down with it), itself built on `internal/espswitch` - factored out of
   `Rollback`'s own inline ESP-swap logic once `rootfs/init`'s local
   revert became a second real consumer of the identical mechanism.
@@ -683,7 +683,7 @@ plan - not implemented yet.
   proves, this one is purely about the health-check/revert mechanics)
   must show `"bootcommit: confirmed healthy"` and never revert; a
   "broken" bundle, a *fresh* rootfs with the host's own
-  dynamically-linked `/bin/false` standing in for `haproxyosd` itself -
+  dynamically-linked `/bin/false` standing in for `janusd` itself -
   since this rootfs ships no dynamic linker or libc at all (every real
   binary in it is statically linked, by design), `Supervisor` doesn't
   even get as far as a successful `exec`, hitting its spawn-failure path
@@ -692,11 +692,11 @@ plan - not implemented yet.
   rebooting into it, then autonomously - **no RPC call from the test
   driving it** - `"giving up and reverting to slot B"`
   (`Supervisor.GiveUpAfter`, proving that backstop specifically); and a
-  third, "haproxy-broken" bundle, with the *real* `haproxyosd` but
+  third, "haproxy-broken" bundle, with the *real* `janusd` but
   `/bin/false` standing in for *haproxy* this time, must show
-  `haproxyosd` itself coming up fine and logging its own confirmation
+  `janusd` itself coming up fine and logging its own confirmation
   attempt, then - again fully autonomous - `"bootcommit: rebooting to
-  complete the revert"` (`cmd/haproxyosd`'s own check specifically, not
+  complete the revert"` (`cmd/janusd`'s own check specifically, not
   the `Supervisor` backstop). All three reverts land back on whichever
   slot was active *when that particular Upgrade was called*, not a
   hardcoded fallback to the original slot A. Every boot is checked via
@@ -740,7 +740,7 @@ plan - not implemented yet.
   purpose: there's no "other slot" yet to leave untouched, the same
   starting point `image/disk/assemble.sh` itself produces at build
   time. Refuses two disks outright: one that already has a partition
-  carrying one of HAProxyOS's own conventional GPT names (`ESP`,
+  carrying one of Janus's own conventional GPT names (`ESP`,
   `STATE`, ...) - "looks like an existing install, use Upgrade/Rollback
   instead" - and the disk this node is itself currently booted from
   (repartitioning that out from under a running system would be
@@ -754,7 +754,7 @@ plan - not implemented yet.
   Proven with a real gRPC call, via `hack/lifecycle-install-test.sh` -
   the one lifecycle test in this project where the RPC call itself
   doesn't run inside a VM: `Install` has no A/B/STATE machinery of its
-  own to depend on (it's what *creates* that machinery), so `haproxyosd`
+  own to depend on (it's what *creates* that machinery), so `janusd`
   runs natively on the test host, the same pattern `image-build.yml`'s
   own "HAProxy gRPC API integration test" step already uses, reading its
   bootstrapped PKI creds straight off `-pki-dir` rather than scraping a
@@ -798,7 +798,7 @@ plan - not implemented yet.
   controls call out (loadable-module restrictions, `/dev/mem`, kexec,
   hibernation, USB/Firewire/staging drivers) was already true by
   construction from `allnoconfig` - this pass is specifically what was
-  left: `kernel/configs/haproxyos_defconfig` grew a KSPP-style
+  left: `kernel/configs/janus_defconfig` grew a KSPP-style
   self-protection block (`STACKPROTECTOR_STRONG`, `SLAB_FREELIST_
   RANDOM`/`_HARDENED`, `HARDENED_USERCOPY`, `FORTIFY_SOURCE`,
   `INIT_ON_ALLOC`/`_FREE_DEFAULT_ON`, `CONFIG_SECURITY` + `SECURITY_
@@ -823,7 +823,7 @@ plan - not implemented yet.
   pointers from anything without the matching capability - the
   unprivileged `haproxy` worker, uid 1000/chroot, specifically),
   `kernel.yama.ptrace_scope=2` (only `CAP_SYS_PTRACE` can attach -
-  `haproxyosd`, root, still can; the worker no longer can, at all),
+  `janusd`, root, still can; the worker no longer can, at all),
   and a set of anti-spoofing/anti-redirect/SYN-flood network sysctls
   chosen for what they mean to a reverse proxy specifically (`tcp_
   syncookies` isn't a generic checklist item on a box whose entire
@@ -902,7 +902,7 @@ plan - not implemented yet.
   Three real domains for the three real processes this rootfs ever
   runs: `init_t` (PID 1, broadly privileged by necessity - mounts every
   filesystem, loads this very policy, is the last-resort revert path),
-  `haproxyosd_t` (also root, moderately broad), and `haproxy_t` - the
+  `janusd_t` (also root, moderately broad), and `haproxy_t` - the
   one domain confinement effort actually went into, since it's the only
   one that ever parses untrusted, internet-facing input: no
   `self:capability` wildcard, only the specific capabilities its own
@@ -957,7 +957,7 @@ plan - not implemented yet.
   *itself* (not implicit just because source and target match - the
   very first `tmpfs` mount failed on exactly this); the process-
   transition permissions `noatsecure`/`rlimitinh`/`siginh`, needed on
-  every `init_t -> haproxyosd_t -> haproxy_t` hop; and, once real
+  every `init_t -> janusd_t -> haproxy_t` hop; and, once real
   network traffic started flowing, `peer`/`packet`/`netif`/`node` class
   rules for `policycap always_check_network` - inbound packets with no
   netlabel/secmark policy configured (this project has none) get the
@@ -977,7 +977,7 @@ plan - not implemented yet.
   baked-in cmdline now carries `enforcing=1` permanently - the actual
   production default, since there's no boot menu to add it from later
   and every real node boots via this exact UKI. `kernel/configs/
-  haproxyos_defconfig`'s `SECURITY_SELINUX_DEVELOP=y` deliberately
+  janus_defconfig`'s `SECURITY_SELINUX_DEVELOP=y` deliberately
   stays on regardless (keeps `/sys/fs/selinux/enforce` toggleable for
   debugging, and the kernel's own compiled-in default without this
   cmdline override would still be the safer permissive one - this UKI

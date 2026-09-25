@@ -18,7 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY classes.conf policy.conf ./
 RUN cat classes.conf policy.conf > combined.conf \
-    && checkpolicy -U allow -o hapos.policy combined.conf
+    && checkpolicy -U allow -o janus.policy combined.conf
 
 FROM scratch AS export
-COPY --from=build /src/hapos.policy /hapos.policy
+COPY --from=build /src/janus.policy /janus.policy

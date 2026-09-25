@@ -1,6 +1,6 @@
-# HAProxyOS management dashboard
+# Janus Controller
 
-A web UI for managing one or more HAProxyOS nodes: register a node by
+A web UI for managing one or more Janus nodes: register a node by
 name/address, view its stats (RAM/CPU/disk, active boot slot,
 kernel/HAProxy version), and drive its config (apply a new HAProxy
 config, manage maps/ACLs/certificates, drain/ready/maint individual
@@ -30,11 +30,11 @@ one. This is a local build/run howto in the meantime.
 make dashboard-image      # from the repo root - builds dashboard/Dockerfile
 ```
 
-This builds a single, self-contained image (`haproxyos-dashboard`,
+This builds a single, self-contained image (`janus-controller`,
 `FROM scratch` - see `Dockerfile`'s own comment for why no system CA
 bundle or shell is needed inside it). It does **not** rebuild the
 frontend SPA from source - `dashboard/backend/static` is already
-committed (same convention `gen/haproxyos/v1alpha1` uses), so this
+committed (same convention `gen/janus/v1alpha1` uses), so this
 build needs no Node.js toolchain. If you've changed `dashboard/frontend`
 source, run `make dashboard-frontend-build` first and commit the
 result before building the image.
@@ -57,11 +57,11 @@ The dashboard needs two things exposed:
 
 ```sh
 docker run -d \
-  --name haproxyos-dashboard \
+  --name janus-controller \
   -p 8080:8080 \
   -p 9500-9599:9500-9599 \
-  -v haproxyos-dashboard-data:/data \
-  haproxyos-dashboard
+  -v janus-controller-data:/data \
+  janus-controller
 ```
 
 `-v .../data` is a real requirement, not optional: it's where the node
@@ -74,8 +74,8 @@ already trusted.
 Then open `http://<host>:8080/` and add a node: you'll need its
 display name, its gRPC address (`ip:9505` by default), its `ca.crt`
 (public, not sensitive), and a client credential that already has
-`os:admin` on that node - either the one `haproxyosd` printed to its
-console on first boot, or one you generated yourself via `haproxyosctl
+`os:admin` on that node - either the one `janusd` printed to its
+console on first boot, or one you generated yourself via `janusctl
 pki generate-client-config`. That credential is used exactly once, to
 call `GenerateClientConfiguration` and obtain a fresh service
 credential for the dashboard's own use - it is never written to disk

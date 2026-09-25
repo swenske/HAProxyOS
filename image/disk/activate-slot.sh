@@ -13,7 +13,7 @@
 # ESP for this disk shape.
 #
 # Also stages BOTH slots' UKIs on the ESP, at fixed paths
-# (\HAPROXYOS\UKI-A.EFI, \HAPROXYOS\UKI-B.EFI) alongside the active
+# (\JANUS\UKI-A.EFI, \JANUS\UKI-B.EFI) alongside the active
 # one (\EFI\BOOT\BOOTX64.EFI) - not because anything boots them
 # directly (only the UEFI-spec fallback path does), but so a running
 # node's own LifecycleService.Rollback (internal/api/lifecycle.go) can
@@ -60,10 +60,10 @@ ACTIVE_UKI="$UKI_A"
 
 ESP_IMG="$WORKDIR/esp.img"
 "$SELF_DIR/../uki/esp-image.sh" "$ESP_IMG" "$ACTIVE_UKI" "$ESP_MB"
-mmd -i "$ESP_IMG" ::/HAPROXYOS
-mcopy -i "$ESP_IMG" "$UKI_A" ::/HAPROXYOS/UKI-A.EFI
-mcopy -i "$ESP_IMG" "$UKI_B" ::/HAPROXYOS/UKI-B.EFI
+mmd -i "$ESP_IMG" ::/JANUS
+mcopy -i "$ESP_IMG" "$UKI_A" ::/JANUS/UKI-A.EFI
+mcopy -i "$ESP_IMG" "$UKI_B" ::/JANUS/UKI-B.EFI
 
 dd if="$ESP_IMG" of="$DISK" bs=512 seek="$ESP_START_SECTOR" conv=notrunc status=none
 
-echo "Slot $ACTIVE_SLOT is now active on $DISK's ESP (both UKI-A.EFI and UKI-B.EFI staged under \\HAPROXYOS\\)"
+echo "Slot $ACTIVE_SLOT is now active on $DISK's ESP (both UKI-A.EFI and UKI-B.EFI staged under \\JANUS\\)"

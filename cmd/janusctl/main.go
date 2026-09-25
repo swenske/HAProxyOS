@@ -1,5 +1,5 @@
-// Command haproxyosctl is the HAProxyOS admin CLI, a thin client over the
-// gRPC API served by haproxyosd (api/proto/haproxyos/v1alpha1), always
+// Command janusctl is the Janus admin CLI, a thin client over the
+// gRPC API served by janusd (api/proto/janus/v1alpha1), always
 // over mTLS (internal/pki) - there is no insecure fallback. Command
 // surface grows alongside its corresponding service implementation (see
 // docs/architecture.md's roadmap).
@@ -20,23 +20,23 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
-	"github.com/swenske/HAProxyOS/internal/pki"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
+	"github.com/swenske/Janus/internal/pki"
 )
 
 var version = "dev"
 
 func main() {
-	endpoint := flag.String("endpoint", "127.0.0.1:9505", "haproxyosd gRPC endpoint")
-	// Defaults match haproxyosd's own default -pki-dir - convenient when
-	// haproxyosctl runs on the same filesystem as the daemon (local/dev
+	endpoint := flag.String("endpoint", "127.0.0.1:9505", "janusd gRPC endpoint")
+	// Defaults match janusd's own default -pki-dir - convenient when
+	// janusctl runs on the same filesystem as the daemon (local/dev
 	// use); a real remote operator passes their own issued certificate
 	// (see "haproxy show-info" etc. needing a cert from
-	// GenerateClientConfiguration first, or the admin cert haproxyosd
+	// GenerateClientConfiguration first, or the admin cert janusd
 	// printed on its first boot).
-	caFile := flag.String("ca", "/etc/haproxyos/pki/ca.crt", "path to the CA certificate")
-	certFile := flag.String("cert", "/etc/haproxyos/pki/admin.crt", "path to the client certificate")
-	keyFile := flag.String("key", "/etc/haproxyos/pki/admin.key", "path to the client private key")
+	caFile := flag.String("ca", "/etc/janus/pki/ca.crt", "path to the CA certificate")
+	certFile := flag.String("cert", "/etc/janus/pki/admin.crt", "path to the client certificate")
+	keyFile := flag.String("key", "/etc/janus/pki/admin.key", "path to the client private key")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -62,7 +62,7 @@ func main() {
 	case "lifecycle":
 		runLifecycle(conn, flag.Args()[1:])
 	default:
-		fmt.Fprintf(os.Stderr, "haproxyosctl: unknown command %q\n", cmd)
+		fmt.Fprintf(os.Stderr, "janusctl: unknown command %q\n", cmd)
 		usage()
 		os.Exit(2)
 	}
@@ -95,9 +95,9 @@ func dial(endpoint, caFile, certFile, keyFile string) (*grpc.ClientConn, error) 
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: haproxyosctl [-endpoint host:port] <command>")
+	fmt.Fprintln(os.Stderr, "usage: janusctl [-endpoint host:port] <command>")
 	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  version                    print haproxyosctl's own version and the connected node's version")
+	fmt.Fprintln(os.Stderr, "  version                    print janusctl's own version and the connected node's version")
 	fmt.Fprintln(os.Stderr, "  system info                print version/kernel/active slot + memory/CPU/load/disk stats (the dashboard's own single-node fetch)")
 	fmt.Fprintln(os.Stderr, "  haproxy show-info          HAProxy version/uptime/connections (stats socket)")
 	fmt.Fprintln(os.Stderr, "  haproxy stats              raw 'show stat' CSV from the stats socket")
@@ -128,7 +128,7 @@ func runVersion(conn *grpc.ClientConn) {
 	c, cancel := ctx()
 	defer cancel()
 
-	resp, err := haproxyosv1alpha1.NewSystemServiceClient(conn).Version(c, &emptypb.Empty{})
+	resp, err := janusv1alpha1.NewSystemServiceClient(conn).Version(c, &emptypb.Empty{})
 	if err != nil {
 		log.Fatalf("Version: %v", err)
 	}
@@ -144,7 +144,7 @@ func runSystem(conn *grpc.ClientConn, args []string) {
 		usage()
 		os.Exit(2)
 	}
-	client := haproxyosv1alpha1.NewSystemServiceClient(conn)
+	client := janusv1alpha1.NewSystemServiceClient(conn)
 
 	c, cancel := ctx()
 	defer cancel()
@@ -208,7 +208,7 @@ func runPKI(conn *grpc.ClientConn, args []string) {
 		role := fs.String("role", "os:admin", "role to request (os:admin or os:reader - see internal/api/authz.go)")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 1 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl pki generate-client-config [-role os:admin|os:reader] DIR")
+			fmt.Fprintln(os.Stderr, "usage: janusctl pki generate-client-config [-role os:admin|os:reader] DIR")
 			os.Exit(2)
 		}
 		dir := fs.Arg(0)
@@ -218,7 +218,7 @@ func runPKI(conn *grpc.ClientConn, args []string) {
 
 		c, cancel := ctx()
 		defer cancel()
-		resp, err := haproxyosv1alpha1.NewSystemServiceClient(conn).GenerateClientConfiguration(c, &haproxyosv1alpha1.GenerateClientConfigurationRequest{
+		resp, err := janusv1alpha1.NewSystemServiceClient(conn).GenerateClientConfiguration(c, &janusv1alpha1.GenerateClientConfigurationRequest{
 			Roles: []string{*role},
 		})
 		if err != nil {
@@ -237,7 +237,7 @@ func runPKI(conn *grpc.ClientConn, args []string) {
 		fmt.Printf("Wrote %s/{ca.crt,client.crt,client.key}\n", dir)
 
 	default:
-		fmt.Fprintf(os.Stderr, "haproxyosctl pki: unknown subcommand %q\n", sub)
+		fmt.Fprintf(os.Stderr, "janusctl pki: unknown subcommand %q\n", sub)
 		usage()
 		os.Exit(2)
 	}
@@ -255,7 +255,7 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle install [-sha256 HEX] DISK BUNDLE_DIR")
+			fmt.Fprintln(os.Stderr, "usage: janusctl lifecycle install [-sha256 HEX] DISK BUNDLE_DIR")
 			os.Exit(2)
 		}
 		disk, bundleDir := fs.Arg(0), fs.Arg(1)
@@ -272,8 +272,8 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		// slot raw writes.
 		c, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
-		stream, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Install(c, &haproxyosv1alpha1.InstallRequest{
-			Source: &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+		stream, err := janusv1alpha1.NewLifecycleServiceClient(conn).Install(c, &janusv1alpha1.InstallRequest{
+			Source: &janusv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
 			Disk:   disk,
 		})
 		if err != nil {
@@ -293,7 +293,7 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 	case "rollback":
 		c, cancel := ctx()
 		defer cancel()
-		resp, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Rollback(c, &emptypb.Empty{})
+		resp, err := janusv1alpha1.NewLifecycleServiceClient(conn).Rollback(c, &emptypb.Empty{})
 		if err != nil {
 			log.Fatalf("Rollback: %v", err)
 		}
@@ -303,10 +303,10 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		fs := flag.NewFlagSet("lifecycle upgrade", flag.ExitOnError)
 		sha256Flag := fs.String("sha256", "", "expected sha256 of BUNDLE_DIR/rootfs.squashfs (defaults to reading BUNDLE_DIR/rootfs.squashfs.sha256, if present - see image/release/assemble.sh)")
 		waitForHealth := fs.Bool("wait-for-health", false, "revert and reboot back to the current slot automatically if the new slot doesn't stay up long enough to confirm healthy (see -health-timeout) - the revert itself happens on the node, not over this call, which still returns as soon as it reboots")
-		healthTimeout := fs.Uint("health-timeout", 0, "seconds the new slot's haproxyosd has to keep running before it's considered healthy and the upgrade is confirmed; 0 uses the node's own default (60s) - only meaningful with -wait-for-health")
+		healthTimeout := fs.Uint("health-timeout", 0, "seconds the new slot's janusd has to keep running before it's considered healthy and the upgrade is confirmed; 0 uses the node's own default (60s) - only meaningful with -wait-for-health")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 1 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR")
+			fmt.Fprintln(os.Stderr, "usage: janusctl lifecycle upgrade [-sha256 HEX] [-wait-for-health] [-health-timeout SECONDS] BUNDLE_DIR")
 			os.Exit(2)
 		}
 		bundleDir := fs.Arg(0)
@@ -325,8 +325,8 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		// confirmation (or possible revert) happens on a later boot.
 		c, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		stream, err := haproxyosv1alpha1.NewLifecycleServiceClient(conn).Upgrade(c, &haproxyosv1alpha1.UpgradeRequest{
-			Source:               &haproxyosv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
+		stream, err := janusv1alpha1.NewLifecycleServiceClient(conn).Upgrade(c, &janusv1alpha1.UpgradeRequest{
+			Source:               &janusv1alpha1.ImageSource{Reference: bundleDir, Sha256: sum},
 			WaitForHealth:        *waitForHealth,
 			HealthTimeoutSeconds: uint32(*healthTimeout),
 		})
@@ -345,7 +345,7 @@ func runLifecycle(conn *grpc.ClientConn, args []string) {
 		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "haproxyosctl lifecycle: unknown subcommand %q\n", sub)
+		fmt.Fprintf(os.Stderr, "janusctl lifecycle: unknown subcommand %q\n", sub)
 		usage()
 		os.Exit(2)
 	}
@@ -356,7 +356,7 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 		usage()
 		os.Exit(2)
 	}
-	client := haproxyosv1alpha1.NewHAProxyServiceClient(conn)
+	client := janusv1alpha1.NewHAProxyServiceClient(conn)
 
 	switch sub := args[0]; sub {
 	case "show-info":
@@ -390,7 +390,7 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 
 	case "apply-config":
 		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy apply-config FILE")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy apply-config FILE")
 			os.Exit(2)
 		}
 		data, err := os.ReadFile(args[1])
@@ -400,11 +400,11 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 
 		c, cancel := ctx()
 		defer cancel()
-		stream, err := client.ApplyConfig(c, &haproxyosv1alpha1.ApplyConfigRequest{Config: data})
+		stream, err := client.ApplyConfig(c, &janusv1alpha1.ApplyConfigRequest{Config: data})
 		if err != nil {
 			log.Fatalf("ApplyConfig: %v", err)
 		}
-		var last *haproxyosv1alpha1.ApplyConfigResponse
+		var last *janusv1alpha1.ApplyConfigResponse
 		for {
 			resp, err := stream.Recv()
 			if err == io.EOF {
@@ -433,12 +433,12 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 
 	case "map-get":
 		if len(args) != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-get MAP")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy map-get MAP")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		resp, err := client.MapGet(c, &haproxyosv1alpha1.MapGetRequest{Map: args[1]})
+		resp, err := client.MapGet(c, &janusv1alpha1.MapGetRequest{Map: args[1]})
 		if err != nil {
 			log.Fatalf("MapGet: %v", err)
 		}
@@ -448,48 +448,48 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 
 	case "map-set":
 		if len(args) != 4 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-set MAP KEY VALUE")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy map-set MAP KEY VALUE")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.MapUpdate(c, &haproxyosv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Value: args[3]})
+		_, err := client.MapUpdate(c, &janusv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Value: args[3]})
 		if err != nil {
 			log.Fatalf("MapUpdate: %v", err)
 		}
 
 	case "map-delete":
 		if len(args) != 3 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy map-delete MAP KEY")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy map-delete MAP KEY")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.MapUpdate(c, &haproxyosv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Delete: true})
+		_, err := client.MapUpdate(c, &janusv1alpha1.MapUpdateRequest{Map: args[1], Key: args[2], Delete: true})
 		if err != nil {
 			log.Fatalf("MapUpdate: %v", err)
 		}
 
 	case "acl-add":
 		if len(args) != 3 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy acl-add ACL VALUE")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy acl-add ACL VALUE")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.ACLUpdate(c, &haproxyosv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2]})
+		_, err := client.ACLUpdate(c, &janusv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2]})
 		if err != nil {
 			log.Fatalf("ACLUpdate: %v", err)
 		}
 
 	case "acl-delete":
 		if len(args) != 3 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy acl-delete ACL VALUE")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy acl-delete ACL VALUE")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.ACLUpdate(c, &haproxyosv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2], Delete: true})
+		_, err := client.ACLUpdate(c, &janusv1alpha1.ACLUpdateRequest{Acl: args[1], Value: args[2], Delete: true})
 		if err != nil {
 			log.Fatalf("ACLUpdate: %v", err)
 		}
@@ -511,7 +511,7 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 		sni := fs.String("sni", "", "comma-separated SNI names to scope the binding to (only meaningful with -crt-list)")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 2 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy cert-upload [-crt-list PATH] [-sni host1,host2] NAME FILE")
 			os.Exit(2)
 		}
 		name, file := fs.Arg(0), fs.Arg(1)
@@ -525,7 +525,7 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err = client.CertificateUpload(c, &haproxyosv1alpha1.CertificateUploadRequest{
+		_, err = client.CertificateUpload(c, &janusv1alpha1.CertificateUploadRequest{
 			Name: name, PemBundle: data, CrtList: *crtList, Sni: sniList,
 		})
 		if err != nil {
@@ -537,18 +537,18 @@ func runHAProxy(conn *grpc.ClientConn, args []string) {
 		crtList := fs.String("crt-list", "", "unbind from this crt-list before deleting - required if the certificate is still bound anywhere")
 		_ = fs.Parse(args[1:])
 		if fs.NArg() != 1 {
-			fmt.Fprintln(os.Stderr, "usage: haproxyosctl haproxy cert-delete [-crt-list PATH] NAME")
+			fmt.Fprintln(os.Stderr, "usage: janusctl haproxy cert-delete [-crt-list PATH] NAME")
 			os.Exit(2)
 		}
 		c, cancel := ctx()
 		defer cancel()
-		_, err := client.CertificateDelete(c, &haproxyosv1alpha1.CertificateDeleteRequest{Name: fs.Arg(0), CrtList: *crtList})
+		_, err := client.CertificateDelete(c, &janusv1alpha1.CertificateDeleteRequest{Name: fs.Arg(0), CrtList: *crtList})
 		if err != nil {
 			log.Fatalf("CertificateDelete: %v", err)
 		}
 
 	default:
-		fmt.Fprintf(os.Stderr, "haproxyosctl haproxy: unknown subcommand %q\n", sub)
+		fmt.Fprintf(os.Stderr, "janusctl haproxy: unknown subcommand %q\n", sub)
 		usage()
 		os.Exit(2)
 	}

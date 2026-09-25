@@ -70,7 +70,7 @@
 #      undiscovered bugs, both fixed alongside this test: (a) a missing
 #      SELinux policy rule (selinux/policy.conf) denied the haproxy_t
 #      domain write access to the fifo_file pipe internal/haproxy.
-#      Manager.Validate's `haproxy -c` inherits from its haproxyosd_t
+#      Manager.Validate's `haproxy -c` inherits from its janusd_t
 #      parent (a genuinely different object from the supervised
 #      process's own console-backed stdout/stderr, already covered) -
 #      every validation error was being silently denied mid-write,
@@ -256,7 +256,7 @@ echo "Relay OK: real data (kernel_version, active_slot=A, memory=${mem_total} by
 # not the main SPA) must actually be served, mTLS-gated the same way
 # /api/info is ---
 NODE_UI="$(curl -sk --cert "$WORKDIR/admin.crt" --key "$WORKDIR/admin.key" "https://127.0.0.1:${NODE_LISTEN_PORT}/")"
-echo "$NODE_UI" | grep -q '<title>HAProxyOS Node</title>' || { echo "Dashboard test FAILED: per-node dashboard page not served at /: $NODE_UI" >&2; exit 1; }
+echo "$NODE_UI" | grep -q '<title>Janus Node</title>' || { echo "Dashboard test FAILED: per-node dashboard page not served at /: $NODE_UI" >&2; exit 1; }
 echo "Per-node UI OK: nodeproxy's own dashboard page is served at / behind the same mTLS gate as /api/info"
 
 # --- tranche 4: ops/config relay (dashboard/backend/internal/nodeproxy/ops.go) ---

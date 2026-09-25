@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Boots a built HAProxyOS kernel directly from rootfs/assemble.sh's
+# Boots a built Janus kernel directly from rootfs/assemble.sh's
 # squashfs+dm-verity image - no initramfs, no userspace verity setup at
 # all. The kernel itself assembles /dev/dm-0 from the two virtio-blk
 # drives below via the "dm-mod.create=" cmdline parameter (see
@@ -26,7 +26,7 @@
 #      have HAProxy answer real HTTP, proving rootfs/init's ephemeral
 #      tmpfs overlay (see rootfs/init/main.go's mountEphemeral) makes
 #      the verified-read-only root genuinely bootable end to end:
-#      haproxyosd's PKI bootstrap and HAProxy's own startup both need to
+#      janusd's PKI bootstrap and HAProxy's own startup both need to
 #      write to paths that live under /etc and /run.
 #   2. a copy of rootfs.squashfs with one byte flipped - dm-verity must
 #      refuse to mount it (no marker, kernel panics trying to mount
@@ -44,7 +44,7 @@ ROOTFS_DIR="${2:?usage: $0 <bzImage> <rootfs-dir>}"
 BOOT_TIMEOUT_SECS="${QEMU_VERITY_BOOT_TIMEOUT:-30}"
 HTTP_TIMEOUT_SECS="${QEMU_VERITY_HTTP_TIMEOUT:-30}"
 HOST_PORT="${QEMU_VERITY_TEST_PORT:-18082}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 
 SQUASHFS="$ROOTFS_DIR/rootfs.squashfs"
 VERITY="$ROOTFS_DIR/rootfs.verity"

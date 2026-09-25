@@ -13,12 +13,12 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
-	"github.com/swenske/HAProxyOS/internal/bootslot"
-	"github.com/swenske/HAProxyOS/internal/diskimage"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
+	"github.com/swenske/Janus/internal/bootslot"
+	"github.com/swenske/Janus/internal/diskimage"
 )
 
-// Install writes a full HAProxyOS image to a blank disk for the first
+// Install writes a full Janus image to a blank disk for the first
 // time - partitioning it from scratch (internal/diskimage.Compute for
 // the byte layout, github.com/diskfs/go-diskfs to actually write the
 // GPT table and filesystems) rather than shelling out to sgdisk/mtools/
@@ -43,13 +43,13 @@ import (
 // target), so getting a machine to actually boot from it is the
 // caller/operator's job.
 //
-// Refuses two disks: one that already looks like a HAProxyOS install
+// Refuses two disks: one that already looks like a Janus install
 // (an existing GPT with a recognizable partition name - "use Upgrade/
 // Rollback instead" per the proto's own doc comment), and the disk this
 // node is itself currently booted from (repartitioning that out from
 // under a running system would be catastrophic, and it's Upgrade's
 // territory anyway).
-func (l *Lifecycle) Install(req *haproxyosv1alpha1.InstallRequest, stream haproxyosv1alpha1.LifecycleService_InstallServer) error {
+func (l *Lifecycle) Install(req *janusv1alpha1.InstallRequest, stream janusv1alpha1.LifecycleService_InstallServer) error {
 	diskPath := req.GetDisk()
 	if diskPath == "" {
 		return status.Errorf(codes.InvalidArgument, "disk is required")
@@ -60,7 +60,7 @@ func (l *Lifecycle) Install(req *haproxyosv1alpha1.InstallRequest, stream haprox
 	}
 
 	send := func(stage string, progress float64, message string) error {
-		return stream.Send(&haproxyosv1alpha1.InstallResponse{Stage: stage, Progress: progress, Message: message})
+		return stream.Send(&janusv1alpha1.InstallResponse{Stage: stage, Progress: progress, Message: message})
 	}
 
 	if err := send("verifying", 0.05, fmt.Sprintf("checking %s and reading release bundle at %s", diskPath, bundleDir)); err != nil {
@@ -152,7 +152,7 @@ func (l *Lifecycle) Install(req *haproxyosv1alpha1.InstallRequest, stream haprox
 	if err := send("formatting-state", 0.6, "creating the persistent STATE filesystem"); err != nil {
 		return err
 	}
-	if _, err := disk.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 6, FSType: filesystem.TypeExt4, VolumeLabel: "haproxyos-state"}); err != nil {
+	if _, err := disk.CreateFilesystem(diskpkg.FilesystemSpec{Partition: 6, FSType: filesystem.TypeExt4, VolumeLabel: "janus-state"}); err != nil {
 		return status.Errorf(codes.Internal, "create STATE filesystem: %v", err)
 	}
 
@@ -166,13 +166,13 @@ func (l *Lifecycle) Install(req *haproxyosv1alpha1.InstallRequest, stream haprox
 	if err := espFS.Mkdir("/EFI/BOOT"); err != nil {
 		return status.Errorf(codes.Internal, "mkdir /EFI/BOOT: %v", err)
 	}
-	if err := espFS.Mkdir("/HAPROXYOS"); err != nil {
-		return status.Errorf(codes.Internal, "mkdir /HAPROXYOS: %v", err)
+	if err := espFS.Mkdir("/JANUS"); err != nil {
+		return status.Errorf(codes.Internal, "mkdir /JANUS: %v", err)
 	}
-	if err := writeESPFile(espFS, "/HAPROXYOS/UKI-A.EFI", ukiA); err != nil {
+	if err := writeESPFile(espFS, "/JANUS/UKI-A.EFI", ukiA); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
-	if err := writeESPFile(espFS, "/HAPROXYOS/UKI-B.EFI", ukiB); err != nil {
+	if err := writeESPFile(espFS, "/JANUS/UKI-B.EFI", ukiB); err != nil {
 		return status.Errorf(codes.Internal, "%v", err)
 	}
 	// Slot A active by default - the same starting point image/disk/
@@ -192,7 +192,7 @@ func (l *Lifecycle) Install(req *haproxyosv1alpha1.InstallRequest, stream haprox
 // active one is Upgrade/Rollback's territory. Never fails the RPC on
 // its own account: if there's nothing to compare against (no /proc/
 // cmdline, or a cmdline that doesn't parse as a recognized A/B boot -
-// e.g. this node itself isn't running a real HAProxyOS install at all),
+// e.g. this node itself isn't running a real Janus install at all),
 // there's simply nothing to refuse.
 func refuseIfCurrentBootDisk(diskPath string) error {
 	cmdline, err := os.ReadFile("/proc/cmdline")
@@ -214,14 +214,14 @@ func refuseIfCurrentBootDisk(diskPath string) error {
 }
 
 // refuseIfAlreadyInstalled rejects a disk that already has a partition
-// carrying one of HAProxyOS's own conventional GPT names (see image/
+// carrying one of Janus's own conventional GPT names (see image/
 // disk/assemble.sh) - the same signal a human running sgdisk -p would
 // use to recognize one. A disk with no partition table at all (d.Table
 // == nil, the common "genuinely blank" case) or some unrelated
-// non-HAProxyOS layout passes through untouched: Install is a bare-
+// non-Janus layout passes through untouched: Install is a bare-
 // metal provisioner and is expected to repartition whatever it's
 // pointed at, same as any other OS installer - the one thing it must
-// not do is destroy a disk that's already a working HAProxyOS node.
+// not do is destroy a disk that's already a working Janus node.
 func refuseIfAlreadyInstalled(d *diskpkg.Disk, diskPath string) error {
 	if d.Table == nil {
 		return nil
@@ -229,7 +229,7 @@ func refuseIfAlreadyInstalled(d *diskpkg.Disk, diskPath string) error {
 	for _, p := range d.Table.GetPartitions() {
 		switch p.Label() {
 		case "ESP", "BOOT-A-DATA", "BOOT-A-HASH", "BOOT-B-DATA", "BOOT-B-HASH", "STATE":
-			return status.Errorf(codes.FailedPrecondition, "%s already has a %q partition - looks like an existing HAProxyOS install; use Upgrade/Rollback instead, or wipe the disk first if this is intentional", diskPath, p.Label())
+			return status.Errorf(codes.FailedPrecondition, "%s already has a %q partition - looks like an existing Janus install; use Upgrade/Rollback instead, or wipe the disk first if this is intentional", diskPath, p.Label())
 		}
 	}
 	return nil

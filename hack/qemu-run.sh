@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Boots a built HAProxyOS kernel+initramfs under QEMU and checks for the
+# Boots a built Janus kernel+initramfs under QEMU and checks for the
 # init's success marker on the (serial) console - the Phase 1 boot-proof
-# test. Exits 0 iff HAPROXYOS_INIT_BOOT_OK appears before the timeout.
+# test. Exits 0 iff JANUS_INIT_BOOT_OK appears before the timeout.
 #
 # Usage: hack/qemu-run.sh <bzImage> <initramfs.cpio.gz>
 set -euo pipefail
@@ -9,7 +9,7 @@ set -euo pipefail
 KERNEL="${1:?usage: $0 <bzImage> <initramfs.cpio.gz>}"
 INITRD="${2:?usage: $0 <bzImage> <initramfs.cpio.gz>}"
 TIMEOUT_SECS="${QEMU_BOOT_TIMEOUT:-30}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT

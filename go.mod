@@ -1,4 +1,4 @@
-module github.com/swenske/HAProxyOS
+module github.com/swenske/Janus
 
 go 1.26
 

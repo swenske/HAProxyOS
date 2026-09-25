@@ -6,20 +6,20 @@
 //
 // Shared by two independent processes, reaching the same conclusion two
 // different ways: rootfs/init's own boot-time revert path
-// (checkBootCommit/giveUpBootCommit - for a haproxyosd that crashes too
+// (checkBootCommit/giveUpBootCommit - for a janusd that crashes too
 // fast, or too often, to ever run its own health check at all) and
-// cmd/haproxyosd's real HAProxy-level health confirmation
-// (internal/bootcommit.Confirm's revert callback - for a haproxyosd
+// cmd/janusd's real HAProxy-level health confirmation
+// (internal/bootcommit.Confirm's revert callback - for a janusd
 // that runs perfectly fine as a *process* but whose HAProxy never
 // actually becomes healthy). Neither process can catch the other's
 // failure mode: rootfs/init has no visibility into HAProxy's own
-// health, and haproxyosd can't act at all if it never gets to run in
+// health, and janusd can't act at all if it never gets to run in
 // the first place.
 //
 // To deliberately stops short of rebooting - callers differ on what
 // "after" should look like (rootfs/init blocks forever waiting for its
 // own syscall.Reboot to take effect, since PID 1 must never return;
-// haproxyosd just issues one and lets the whole machine go down with
+// janusd just issues one and lets the whole machine go down with
 // it, no special handling needed) - so this leaves that one step, and
 // the syscall.Sync() that should precede it, to the caller.
 package bootrevert
@@ -28,9 +28,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/swenske/HAProxyOS/internal/bootcommit"
-	"github.com/swenske/HAProxyOS/internal/bootslot"
-	"github.com/swenske/HAProxyOS/internal/espswitch"
+	"github.com/swenske/Janus/internal/bootcommit"
+	"github.com/swenske/Janus/internal/bootslot"
+	"github.com/swenske/Janus/internal/espswitch"
 )
 
 // To switches the currently-booted disk's ESP to marker.RevertTo and

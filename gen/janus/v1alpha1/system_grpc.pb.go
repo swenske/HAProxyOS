@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: haproxyos/v1alpha1/system.proto
+// source: janus/v1alpha1/system.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	context "context"
@@ -20,38 +20,38 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SystemService_Version_FullMethodName                     = "/haproxyos.v1alpha1.SystemService/Version"
-	SystemService_Hostname_FullMethodName                    = "/haproxyos.v1alpha1.SystemService/Hostname"
-	SystemService_Reboot_FullMethodName                      = "/haproxyos.v1alpha1.SystemService/Reboot"
-	SystemService_Shutdown_FullMethodName                    = "/haproxyos.v1alpha1.SystemService/Shutdown"
-	SystemService_Restart_FullMethodName                     = "/haproxyos.v1alpha1.SystemService/Restart"
-	SystemService_Reset_FullMethodName                       = "/haproxyos.v1alpha1.SystemService/Reset"
-	SystemService_ApplyConfiguration_FullMethodName          = "/haproxyos.v1alpha1.SystemService/ApplyConfiguration"
-	SystemService_Events_FullMethodName                      = "/haproxyos.v1alpha1.SystemService/Events"
-	SystemService_Dmesg_FullMethodName                       = "/haproxyos.v1alpha1.SystemService/Dmesg"
-	SystemService_Logs_FullMethodName                        = "/haproxyos.v1alpha1.SystemService/Logs"
-	SystemService_Stats_FullMethodName                       = "/haproxyos.v1alpha1.SystemService/Stats"
-	SystemService_SystemStat_FullMethodName                  = "/haproxyos.v1alpha1.SystemService/SystemStat"
-	SystemService_Memory_FullMethodName                      = "/haproxyos.v1alpha1.SystemService/Memory"
-	SystemService_CPUInfo_FullMethodName                     = "/haproxyos.v1alpha1.SystemService/CPUInfo"
-	SystemService_LoadAvg_FullMethodName                     = "/haproxyos.v1alpha1.SystemService/LoadAvg"
-	SystemService_DiskStats_FullMethodName                   = "/haproxyos.v1alpha1.SystemService/DiskStats"
-	SystemService_DiskUsage_FullMethodName                   = "/haproxyos.v1alpha1.SystemService/DiskUsage"
-	SystemService_NetworkDeviceStats_FullMethodName          = "/haproxyos.v1alpha1.SystemService/NetworkDeviceStats"
-	SystemService_Netstat_FullMethodName                     = "/haproxyos.v1alpha1.SystemService/Netstat"
-	SystemService_Mounts_FullMethodName                      = "/haproxyos.v1alpha1.SystemService/Mounts"
-	SystemService_Processes_FullMethodName                   = "/haproxyos.v1alpha1.SystemService/Processes"
-	SystemService_ServiceList_FullMethodName                 = "/haproxyos.v1alpha1.SystemService/ServiceList"
-	SystemService_ServiceStart_FullMethodName                = "/haproxyos.v1alpha1.SystemService/ServiceStart"
-	SystemService_ServiceStop_FullMethodName                 = "/haproxyos.v1alpha1.SystemService/ServiceStop"
-	SystemService_ServiceRestart_FullMethodName              = "/haproxyos.v1alpha1.SystemService/ServiceRestart"
-	SystemService_List_FullMethodName                        = "/haproxyos.v1alpha1.SystemService/List"
-	SystemService_Read_FullMethodName                        = "/haproxyos.v1alpha1.SystemService/Read"
-	SystemService_Copy_FullMethodName                        = "/haproxyos.v1alpha1.SystemService/Copy"
-	SystemService_PacketCapture_FullMethodName               = "/haproxyos.v1alpha1.SystemService/PacketCapture"
-	SystemService_MetaWrite_FullMethodName                   = "/haproxyos.v1alpha1.SystemService/MetaWrite"
-	SystemService_MetaDelete_FullMethodName                  = "/haproxyos.v1alpha1.SystemService/MetaDelete"
-	SystemService_GenerateClientConfiguration_FullMethodName = "/haproxyos.v1alpha1.SystemService/GenerateClientConfiguration"
+	SystemService_Version_FullMethodName                     = "/janus.v1alpha1.SystemService/Version"
+	SystemService_Hostname_FullMethodName                    = "/janus.v1alpha1.SystemService/Hostname"
+	SystemService_Reboot_FullMethodName                      = "/janus.v1alpha1.SystemService/Reboot"
+	SystemService_Shutdown_FullMethodName                    = "/janus.v1alpha1.SystemService/Shutdown"
+	SystemService_Restart_FullMethodName                     = "/janus.v1alpha1.SystemService/Restart"
+	SystemService_Reset_FullMethodName                       = "/janus.v1alpha1.SystemService/Reset"
+	SystemService_ApplyConfiguration_FullMethodName          = "/janus.v1alpha1.SystemService/ApplyConfiguration"
+	SystemService_Events_FullMethodName                      = "/janus.v1alpha1.SystemService/Events"
+	SystemService_Dmesg_FullMethodName                       = "/janus.v1alpha1.SystemService/Dmesg"
+	SystemService_Logs_FullMethodName                        = "/janus.v1alpha1.SystemService/Logs"
+	SystemService_Stats_FullMethodName                       = "/janus.v1alpha1.SystemService/Stats"
+	SystemService_SystemStat_FullMethodName                  = "/janus.v1alpha1.SystemService/SystemStat"
+	SystemService_Memory_FullMethodName                      = "/janus.v1alpha1.SystemService/Memory"
+	SystemService_CPUInfo_FullMethodName                     = "/janus.v1alpha1.SystemService/CPUInfo"
+	SystemService_LoadAvg_FullMethodName                     = "/janus.v1alpha1.SystemService/LoadAvg"
+	SystemService_DiskStats_FullMethodName                   = "/janus.v1alpha1.SystemService/DiskStats"
+	SystemService_DiskUsage_FullMethodName                   = "/janus.v1alpha1.SystemService/DiskUsage"
+	SystemService_NetworkDeviceStats_FullMethodName          = "/janus.v1alpha1.SystemService/NetworkDeviceStats"
+	SystemService_Netstat_FullMethodName                     = "/janus.v1alpha1.SystemService/Netstat"
+	SystemService_Mounts_FullMethodName                      = "/janus.v1alpha1.SystemService/Mounts"
+	SystemService_Processes_FullMethodName                   = "/janus.v1alpha1.SystemService/Processes"
+	SystemService_ServiceList_FullMethodName                 = "/janus.v1alpha1.SystemService/ServiceList"
+	SystemService_ServiceStart_FullMethodName                = "/janus.v1alpha1.SystemService/ServiceStart"
+	SystemService_ServiceStop_FullMethodName                 = "/janus.v1alpha1.SystemService/ServiceStop"
+	SystemService_ServiceRestart_FullMethodName              = "/janus.v1alpha1.SystemService/ServiceRestart"
+	SystemService_List_FullMethodName                        = "/janus.v1alpha1.SystemService/List"
+	SystemService_Read_FullMethodName                        = "/janus.v1alpha1.SystemService/Read"
+	SystemService_Copy_FullMethodName                        = "/janus.v1alpha1.SystemService/Copy"
+	SystemService_PacketCapture_FullMethodName               = "/janus.v1alpha1.SystemService/PacketCapture"
+	SystemService_MetaWrite_FullMethodName                   = "/janus.v1alpha1.SystemService/MetaWrite"
+	SystemService_MetaDelete_FullMethodName                  = "/janus.v1alpha1.SystemService/MetaDelete"
+	SystemService_GenerateClientConfiguration_FullMethodName = "/janus.v1alpha1.SystemService/GenerateClientConfiguration"
 )
 
 // SystemServiceClient is the client API for SystemService service.
@@ -74,7 +74,7 @@ type SystemServiceClient interface {
 	// Reboot power-cycles the whole machine.
 	Reboot(ctx context.Context, in *RebootRequest, opts ...grpc.CallOption) (*RebootResponse, error)
 	Shutdown(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*ShutdownResponse, error)
-	// Restart restarts the haproxyosd control-plane process in place,
+	// Restart restarts the janusd control-plane process in place,
 	// without rebooting the machine or interrupting HAProxy itself.
 	Restart(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*RestartResponse, error)
 	// Reset wipes the requested partitions (state/ephemeral) and reboots -
@@ -552,7 +552,7 @@ type SystemServiceServer interface {
 	// Reboot power-cycles the whole machine.
 	Reboot(context.Context, *RebootRequest) (*RebootResponse, error)
 	Shutdown(context.Context, *emptypb.Empty) (*ShutdownResponse, error)
-	// Restart restarts the haproxyosd control-plane process in place,
+	// Restart restarts the janusd control-plane process in place,
 	// without rebooting the machine or interrupting HAProxy itself.
 	Restart(context.Context, *emptypb.Empty) (*RestartResponse, error)
 	// Reset wipes the requested partitions (state/ephemeral) and reboots -
@@ -1243,7 +1243,7 @@ func _SystemService_GenerateClientConfiguration_Handler(srv interface{}, ctx con
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var SystemService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "haproxyos.v1alpha1.SystemService",
+	ServiceName: "janus.v1alpha1.SystemService",
 	HandlerType: (*SystemServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -1386,5 +1386,5 @@ var SystemService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "haproxyos/v1alpha1/system.proto",
+	Metadata: "janus/v1alpha1/system.proto",
 }

@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: haproxyos/v1alpha1/common.proto
+// source: janus/v1alpha1/common.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -33,7 +33,7 @@ type Data struct {
 
 func (x *Data) Reset() {
 	*x = Data{}
-	mi := &file_haproxyos_v1alpha1_common_proto_msgTypes[0]
+	mi := &file_janus_v1alpha1_common_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +45,7 @@ func (x *Data) String() string {
 func (*Data) ProtoMessage() {}
 
 func (x *Data) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_common_proto_msgTypes[0]
+	mi := &file_janus_v1alpha1_common_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +58,7 @@ func (x *Data) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Data.ProtoReflect.Descriptor instead.
 func (*Data) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_common_proto_rawDescGZIP(), []int{0}
+	return file_janus_v1alpha1_common_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *Data) GetBytes() []byte {
@@ -84,7 +84,7 @@ type Metadata struct {
 
 func (x *Metadata) Reset() {
 	*x = Metadata{}
-	mi := &file_haproxyos_v1alpha1_common_proto_msgTypes[1]
+	mi := &file_janus_v1alpha1_common_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -96,7 +96,7 @@ func (x *Metadata) String() string {
 func (*Metadata) ProtoMessage() {}
 
 func (x *Metadata) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_common_proto_msgTypes[1]
+	mi := &file_janus_v1alpha1_common_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -109,7 +109,7 @@ func (x *Metadata) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Metadata.ProtoReflect.Descriptor instead.
 func (*Metadata) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_common_proto_rawDescGZIP(), []int{1}
+	return file_janus_v1alpha1_common_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *Metadata) GetHostname() string {
@@ -126,35 +126,35 @@ func (x *Metadata) GetError() string {
 	return ""
 }
 
-var File_haproxyos_v1alpha1_common_proto protoreflect.FileDescriptor
+var File_janus_v1alpha1_common_proto protoreflect.FileDescriptor
 
-const file_haproxyos_v1alpha1_common_proto_rawDesc = "" +
+const file_janus_v1alpha1_common_proto_rawDesc = "" +
 	"\n" +
-	"\x1fhaproxyos/v1alpha1/common.proto\x12\x12haproxyos.v1alpha1\"\x1c\n" +
+	"\x1bjanus/v1alpha1/common.proto\x12\x0ejanus.v1alpha1\"\x1c\n" +
 	"\x04Data\x12\x14\n" +
 	"\x05bytes\x18\x01 \x01(\fR\x05bytes\"<\n" +
 	"\bMetadata\x12\x1a\n" +
 	"\bhostname\x18\x01 \x01(\tR\bhostname\x12\x14\n" +
-	"\x05error\x18\x02 \x01(\tR\x05errorBGZEgithub.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1b\x06proto3"
+	"\x05error\x18\x02 \x01(\tR\x05errorB;Z9github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1b\x06proto3"
 
 var (
-	file_haproxyos_v1alpha1_common_proto_rawDescOnce sync.Once
-	file_haproxyos_v1alpha1_common_proto_rawDescData []byte
+	file_janus_v1alpha1_common_proto_rawDescOnce sync.Once
+	file_janus_v1alpha1_common_proto_rawDescData []byte
 )
 
-func file_haproxyos_v1alpha1_common_proto_rawDescGZIP() []byte {
-	file_haproxyos_v1alpha1_common_proto_rawDescOnce.Do(func() {
-		file_haproxyos_v1alpha1_common_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_haproxyos_v1alpha1_common_proto_rawDesc), len(file_haproxyos_v1alpha1_common_proto_rawDesc)))
+func file_janus_v1alpha1_common_proto_rawDescGZIP() []byte {
+	file_janus_v1alpha1_common_proto_rawDescOnce.Do(func() {
+		file_janus_v1alpha1_common_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_janus_v1alpha1_common_proto_rawDesc), len(file_janus_v1alpha1_common_proto_rawDesc)))
 	})
-	return file_haproxyos_v1alpha1_common_proto_rawDescData
+	return file_janus_v1alpha1_common_proto_rawDescData
 }
 
-var file_haproxyos_v1alpha1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
-var file_haproxyos_v1alpha1_common_proto_goTypes = []any{
-	(*Data)(nil),     // 0: haproxyos.v1alpha1.Data
-	(*Metadata)(nil), // 1: haproxyos.v1alpha1.Metadata
+var file_janus_v1alpha1_common_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_janus_v1alpha1_common_proto_goTypes = []any{
+	(*Data)(nil),     // 0: janus.v1alpha1.Data
+	(*Metadata)(nil), // 1: janus.v1alpha1.Metadata
 }
-var file_haproxyos_v1alpha1_common_proto_depIdxs = []int32{
+var file_janus_v1alpha1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -162,26 +162,26 @@ var file_haproxyos_v1alpha1_common_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_haproxyos_v1alpha1_common_proto_init() }
-func file_haproxyos_v1alpha1_common_proto_init() {
-	if File_haproxyos_v1alpha1_common_proto != nil {
+func init() { file_janus_v1alpha1_common_proto_init() }
+func file_janus_v1alpha1_common_proto_init() {
+	if File_janus_v1alpha1_common_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_haproxyos_v1alpha1_common_proto_rawDesc), len(file_haproxyos_v1alpha1_common_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_janus_v1alpha1_common_proto_rawDesc), len(file_janus_v1alpha1_common_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_haproxyos_v1alpha1_common_proto_goTypes,
-		DependencyIndexes: file_haproxyos_v1alpha1_common_proto_depIdxs,
-		MessageInfos:      file_haproxyos_v1alpha1_common_proto_msgTypes,
+		GoTypes:           file_janus_v1alpha1_common_proto_goTypes,
+		DependencyIndexes: file_janus_v1alpha1_common_proto_depIdxs,
+		MessageInfos:      file_janus_v1alpha1_common_proto_msgTypes,
 	}.Build()
-	File_haproxyos_v1alpha1_common_proto = out.File
-	file_haproxyos_v1alpha1_common_proto_goTypes = nil
-	file_haproxyos_v1alpha1_common_proto_depIdxs = nil
+	File_janus_v1alpha1_common_proto = out.File
+	file_janus_v1alpha1_common_proto_goTypes = nil
+	file_janus_v1alpha1_common_proto_depIdxs = nil
 }

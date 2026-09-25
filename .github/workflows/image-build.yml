@@ -1,4 +1,4 @@
-# Full HAProxyOS image build: kernel, pkgs/*, rootfs assembly, and the
+# Full Janus image build: kernel, pkgs/*, rootfs assembly, and the
 # per-target disk images (image/disk, image/iso, image/kvm-proxmox,
 # image/vmware). Runs on the self-hosted runner - this is the heavy,
 # long-running, Docker-and-toolchain-dependent job, kept strictly separate
@@ -6,7 +6,7 @@
 #
 # workflow_dispatch only, on purpose - never triggered by push/pull_request.
 # Phase 1 (kernel + shell-less init boots under QEMU) and Phase 2 (static
-# HAProxy, supervised by haproxyosd, reachable over the network *inside*
+# HAProxy, supervised by janusd, reachable over the network *inside*
 # the QEMU-booted kernel via virtio-net + DHCP) are real as of the steps
 # below - verified both locally and by running this exact workflow.
 # rootfs/assemble.sh and image/* (Phase 3) are still stubs - filled in
@@ -64,9 +64,9 @@ jobs:
         run: make qemu-boot-test
 
       # Phase 2: builds the static musl+OpenSSL haproxy binary (pkgs/
-      # haproxy/Dockerfile) and haproxyosd, packages init + haproxyosd +
+      # haproxy/Dockerfile) and janusd, packages init + janusd +
       # haproxy + the bootstrap config into a second initramfs (rootfs/
-      # init detects haproxyosd's presence and supervises it instead of
+      # init detects janusd's presence and supervises it instead of
       # powering off), boots that under QEMU with virtio-net + DHCP, and
       # polls a forwarded host port until HAProxy - running *inside* the
       # VM - answers over real TCP/IP (hack/qemu-network-test.sh).
@@ -77,7 +77,7 @@ jobs:
       # benchmark's kernel-adjacent controls call out (loadable-module
       # restrictions, /dev/mem, kexec, hibernation, USB/Firewire/
       # staging drivers) was already true by construction from
-      # allnoconfig; kernel/configs/haproxyos_defconfig's own new
+      # allnoconfig; kernel/configs/janus_defconfig's own new
       # KSPP-style self-protection block (STACKPROTECTOR_STRONG,
       # SLAB_FREELIST_RANDOM/_HARDENED, HARDENED_USERCOPY,
       # FORTIFY_SOURCE, INIT_ON_ALLOC/_FREE_DEFAULT_ON, CONFIG_SECURITY
@@ -110,14 +110,14 @@ jobs:
       - name: HAProxy gRPC API integration test (mTLS)
         run: |
           set -euo pipefail
-          # haproxyosd's own default paths (-haproxy-config/-pid/-stats-socket/
+          # janusd's own default paths (-haproxy-config/-pid/-stats-socket/
           # -pki-dir) ARE the real target layout - use them as-is rather than
           # workspace-relative paths, since haproxy.cfg's "stats socket" line
           # (rootfs/base/etc/haproxy/haproxy.cfg) hardcodes
-          # /run/haproxyos/haproxy-admin.sock and must match whatever
-          # haproxyosd is told to look for.
+          # /run/janus/haproxy-admin.sock and must match whatever
+          # janusd is told to look for.
           #
-          # /etc/haproxyos/pki specifically gets wiped first, not just
+          # /etc/janus/pki specifically gets wiped first, not just
           # mkdir -p'd: haproxyos-runner01 is a persistent self-hosted
           # runner, so a previous run's already-bootstrapped PKI
           # survives on disk between workflow runs (unlike a GitHub-
@@ -129,20 +129,20 @@ jobs:
           # run failed to load under the new code with "CA key is not
           # ECDSA", not a missing-cleanup problem visible until the key
           # algorithm itself changed.
-          sudo rm -rf /etc/haproxyos/pki
-          sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
+          sudo rm -rf /etc/janus/pki
+          sudo mkdir -p /run/janus /etc/haproxy /etc/janus
           sudo cp rootfs/base/etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg
           # chroot /var/empty is in that config now - the chroot() syscall
-          # needs real root (CAP_SYS_CHROOT), so haproxyosd (and therefore
+          # needs real root (CAP_SYS_CHROOT), so janusd (and therefore
           # haproxy, its child) runs under sudo here, matching how PID 1
           # (rootfs/init, itself root) actually starts it on the real
-          # target OS. haproxyosctl needs sudo too, purely to read the
-          # root-owned PKI files haproxyosd bootstraps.
+          # target OS. janusctl needs sudo too, purely to read the
+          # root-owned PKI files janusd bootstraps.
           sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
 
-          sudo ./bin/haproxyosd -addr :19505 -haproxy-binary "$PWD/build/haproxy" \
-            & echo $! > /tmp/haproxyosd.pid
-          trap 'sudo kill "$(cat /tmp/haproxyosd.pid)" 2>/dev/null || true; sudo pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
+          sudo ./bin/janusd -addr :19505 -haproxy-binary "$PWD/build/haproxy" \
+            & echo $! > /tmp/janusd.pid
+          trap 'sudo kill "$(cat /tmp/janusd.pid)" 2>/dev/null || true; sudo pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
 
           sleep 2
           code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/)"
@@ -152,16 +152,16 @@ jobs:
           fi
 
           # First boot generated a CA + admin client certificate at
-          # /etc/haproxyos/pki (see internal/pki) - haproxyosctl's own
+          # /etc/janus/pki (see internal/pki) - janusctl's own
           # defaults already point there, matching a real node where ctl
           # and daemon share a filesystem.
-          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 haproxy show-info
+          sudo ./bin/janusctl -endpoint 127.0.0.1:19505 haproxy show-info
 
           # Exercise GenerateClientConfiguration for real: issue a second
           # client certificate over the mTLS-authenticated connection and
           # confirm it authenticates on its own.
-          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config /tmp/ci-client
-          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 \
+          sudo ./bin/janusctl -endpoint 127.0.0.1:19505 pki generate-client-config /tmp/ci-client
+          sudo ./bin/janusctl -endpoint 127.0.0.1:19505 \
             -ca /tmp/ci-client/ca.crt -cert /tmp/ci-client/client.crt -key /tmp/ci-client/client.key \
             version
 
@@ -169,11 +169,11 @@ jobs:
           # must be able to call a read-only RPC and must be rejected
           # (PermissionDenied) on a mutating one - including trying to
           # self-escalate via GenerateClientConfiguration.
-          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 pki generate-client-config -role os:reader /tmp/ci-reader
+          sudo ./bin/janusctl -endpoint 127.0.0.1:19505 pki generate-client-config -role os:reader /tmp/ci-reader
           reader_flags=(-ca /tmp/ci-reader/ca.crt -cert /tmp/ci-reader/client.crt -key /tmp/ci-reader/client.key)
-          sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy show-info
+          sudo ./bin/janusctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy show-info
 
-          if sudo ./bin/haproxyosctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy apply-config rootfs/base/etc/haproxy/haproxy.cfg 2>/tmp/reader-denied.log; then
+          if sudo ./bin/janusctl -endpoint 127.0.0.1:19505 "${reader_flags[@]}" haproxy apply-config rootfs/base/etc/haproxy/haproxy.cfg 2>/tmp/reader-denied.log; then
             echo "expected os:reader to be denied ApplyConfig, it succeeded" >&2
             exit 1
           fi
@@ -183,7 +183,7 @@ jobs:
       # against real file-backed map/ACL entries and a real uploaded
       # certificate, not just unit-tested against captured fixtures (see
       # internal/haproxy/runtime_maps_test.go / runtime_certs_test.go for
-      # those). A previous haproxyosd instance's config didn't declare any
+      # those). A previous janusd instance's config didn't declare any
       # maps/ACLs (rootfs/base/etc/haproxy/haproxy.cfg is deliberately
       # minimal) - MapList/ACLUpdate only ever see *file-backed*
       # maps/ACLs, so this step applies its own config with one of each,
@@ -203,33 +203,33 @@ jobs:
 
           cat > /tmp/rt-haproxy.cfg <<'EOF'
           global
-              stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
+              stats socket /run/janus/haproxy-admin.sock mode 660 level admin
           defaults
               mode http
               timeout connect 5s
               timeout client 30s
               timeout server 30s
-          frontend haproxyos-health
+          frontend janus-health
               bind *:8080
               acl blocked src -f /tmp/rt-acls/blocked.acl
               http-request deny if blocked
               http-request set-header X-Mapped %[req.hdr(host),map(/tmp/rt-maps/hosts.map,default)]
               http-request return status 200 content-type text/plain string "up\n"
-          frontend haproxyos-tls
+          frontend janus-tls
               bind *:8443 ssl crt-list /tmp/rt-certs/crt-list.txt
               http-request return status 200 content-type text/plain string "tls-up\n"
           EOF
 
           # Same reasoning as the gRPC integration test step above: this
           # step's own -pki-dir (pki-rt, deliberately separate from that
-          # step's /etc/haproxyos/pki) can equally carry stale material
+          # step's /etc/janus/pki) can equally carry stale material
           # from a previous run on this persistent runner.
-          sudo rm -rf /etc/haproxyos/pki-rt
-          sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
-          sudo chown -R "$(id -u):$(id -g)" /run/haproxyos /etc/haproxy /etc/haproxyos
+          sudo rm -rf /etc/janus/pki-rt
+          sudo mkdir -p /run/janus /etc/haproxy /etc/janus
+          sudo chown -R "$(id -u):$(id -g)" /run/janus /etc/haproxy /etc/janus
           sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
 
-          # haproxyosd starts haproxy with this exact config at boot
+          # janusd starts haproxy with this exact config at boot
           # (-haproxy-config) - no need to re-apply it over the API
           # afterward. Doing so anyway raced the seamless reload against
           # the runtime-API calls below and was caught here in a local
@@ -238,13 +238,13 @@ jobs:
           # hard-to-explain failures ("No ongoing transaction!" on a
           # commit whose "set" had just "succeeded") that had nothing to
           # do with the map/ACL/cert code itself.
-          ./bin/haproxyosd -addr :19506 -haproxy-binary "$PWD/build/haproxy" \
-            -pki-dir /etc/haproxyos/pki-rt -haproxy-config /tmp/rt-haproxy.cfg \
-            & echo $! > /tmp/haproxyosd-rt.pid
-          trap 'kill "$(cat /tmp/haproxyosd-rt.pid)" 2>/dev/null || true; pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
+          ./bin/janusd -addr :19506 -haproxy-binary "$PWD/build/haproxy" \
+            -pki-dir /etc/janus/pki-rt -haproxy-config /tmp/rt-haproxy.cfg \
+            & echo $! > /tmp/janusd-rt.pid
+          trap 'kill "$(cat /tmp/janusd-rt.pid)" 2>/dev/null || true; pkill -f "$PWD/build/haproxy" 2>/dev/null || true' EXIT
           sleep 2
-          ctl() { ./bin/haproxyosctl -endpoint 127.0.0.1:19506 -ca /etc/haproxyos/pki-rt/ca.crt \
-            -cert /etc/haproxyos/pki-rt/admin.crt -key /etc/haproxyos/pki-rt/admin.key "$@"; }
+          ctl() { ./bin/janusctl -endpoint 127.0.0.1:19506 -ca /etc/janus/pki-rt/ca.crt \
+            -cert /etc/janus/pki-rt/admin.crt -key /etc/janus/pki-rt/admin.key "$@"; }
 
           [ "$(ctl haproxy map-list)" = "/tmp/rt-maps/hosts.map" ]
           ctl haproxy map-set /tmp/rt-maps/hosts.map www.new.com backendX
@@ -335,14 +335,14 @@ jobs:
 
       # Phase 3 cont'd: proves rootfs/state-image.sh's persistent STATE
       # partition survives a reboot, not just that it mounts - three
-      # boots against the SAME state.img: haproxyosd's "first boot" log
+      # boots against the SAME state.img: janusd's "first boot" log
       # line appears once, not twice (PKI persists), and a config
       # written directly onto the persisted haproxy/ subdirectory
       # between boots (standing in for a real ApplyConfig RPC) is what
       # HAProxy actually starts from afterward, not the squashfs's
       # read-only bootstrap default. See hack/qemu-state-persist-test.sh
       # and rootfs/init/main.go's mountState/mountEphemeral for what's
-      # ephemeral (/run, /tmp) vs persistent (/etc/haproxyos/pki and
+      # ephemeral (/run, /tmp) vs persistent (/etc/janus/pki and
       # /etc/haproxy, bind-mounted from the STATE partition).
       - name: Persistent STATE partition survives a reboot (Phase 3 cont'd)
         run: make qemu-state-persist-test
@@ -361,7 +361,7 @@ jobs:
       # resolveStateDevice (cmdline.go) actually finds STATE (partition
       # 6 - image/disk/assemble.sh now has an ESP as partition 1 too,
       # ahead of both A/B slots) on this real single-disk layout by
-      # parsing its own /proc/cmdline - haproxyosd's "first boot" log
+      # parsing its own /proc/cmdline - janusd's "first boot" log
       # line must not reappear, since boot 1 already bootstrapped a CA
       # there. See hack/qemu-ab-boot-test.sh's own comment for why the
       # disk isn't attached read-only for this test (dm-verity's own
@@ -409,7 +409,7 @@ jobs:
       # has no package manager, so it can never shell out to `ukify` the
       # way image/disk/activate-slot.sh does - just mounts the ESP
       # (CONFIG_VFAT_FS) and copies the other slot's pre-staged UKI
-      # (\HAPROXYOS\UKI-A.EFI / UKI-B.EFI, staged there by
+      # (\JANUS\UKI-A.EFI / UKI-B.EFI, staged there by
       # activate-slot.sh precisely so this doesn't need to build
       # anything at runtime) over \EFI\BOOT\BOOTX64.EFI, then reboots
       # for real. This test boots without -no-reboot, unlike every
@@ -418,12 +418,12 @@ jobs:
       # boot marker appears exactly twice, the cmdline on the second
       # boot references slot B's partitions, and PKI's "first boot" line
       # appears exactly once (STATE survived a real, API-driven reboot).
-      # mTLS credentials for the test's own haproxyosctl call are
+      # mTLS credentials for the test's own janusctl call are
       # extracted straight from disk.img's STATE partition via debugfs
-      # (not the console - haproxyosd does print all three, CA cert
+      # (not the console - janusd does print all three, CA cert
       # included, once on first boot, but a script can't watch a live
       # console the way a real operator would - see
-      # cmd/haproxyosd/main.go). See hack/qemu-lifecycle-rollback-test.sh.
+      # cmd/janusd/main.go). See hack/qemu-lifecycle-rollback-test.sh.
       - name: LifecycleService.Rollback reboots into the other slot for real (Phase 3 cont'd)
         run: make qemu-lifecycle-rollback-test
 
@@ -483,7 +483,7 @@ jobs:
       # never run there). The test builds a second rootfs with
       # different content (different squashfs, different root hash),
       # injects its release bundle into disk.img's STATE partition via
-      # debugfs *before* the first boot (haproxyosctl and haproxyosd
+      # debugfs *before* the first boot (janusctl and janusd
       # don't share a filesystem across this QEMU host/guest boundary,
       # unlike CLAUDE.md's normal "share a filesystem" case - and
       # writing to STATE from the host while the guest also has it
@@ -492,7 +492,7 @@ jobs:
       # switches the ESP, and reboots. A real bug was found writing
       # this test - not in Upgrade itself, but in the test's own first
       # assumption that a different bootstrap HAProxy config (bound to
-      # a different port) would prove v2 was running: HAProxyOS's STATE
+      # a different port) would prove v2 was running: Janus's STATE
       # partition is one partition shared by both A/B slots, and
       # rootfs/init/main.go's seedPersistentHaproxyCfg deliberately
       # never overwrites an already-persisted config, so slot B keeps
@@ -510,18 +510,18 @@ jobs:
         run: make qemu-lifecycle-upgrade-test
 
       # Phase 3 cont'd: wait_for_health is real, confirmed against
-      # HAProxy's own stats socket, not just haproxyosd process
+      # HAProxy's own stats socket, not just janusd process
       # survival. A pending "boot pending confirmation" marker
       # (internal/bootcommit), written to STATE right before the ESP
-      # switch, is what the *next* boot's cmd/haproxyosd checks at
+      # switch, is what the *next* boot's cmd/janusd checks at
       # startup: in the background, it polls HAProxy's own stats socket
       # (internal/haproxy.Manager.ShowInfo) until it succeeds several
       # times in a row, then clears the marker itself
       # (internal/bootcommit.Confirm) - real, application-level health.
-      # If that never happens within health_timeout_seconds, haproxyosd
+      # If that never happens within health_timeout_seconds, janusd
       # reverts and reboots itself directly, no RPC involved. A first
       # version of this piggybacked on Supervisor's own proactive
-      # stability tracking (an OnStable hook, "the haproxyosd *process*
+      # stability tracking (an OnStable hook, "the janusd *process*
       # stayed up a while") - removed once this real check landed, since
       # the two would have raced (the weaker, earlier signal could clear
       # the marker before the real health check ever got a verdict).
@@ -529,7 +529,7 @@ jobs:
       # documented exception to that package's otherwise-unconditional
       # "restart forever" policy, active only when a marker is pending -
       # stays as a *complementary* backstop for the one thing
-      # haproxyosd's own check structurally can't catch: haproxyosd
+      # janusd's own check structurally can't catch: janusd
       # crashing too fast, or too often, to ever run that check at all.
       # Both revert paths share one internal/bootrevert.To helper, built
       # on internal/espswitch (factored out of Rollback's own inline
@@ -537,15 +537,15 @@ jobs:
       # real consumer of the identical mechanism).
       # hack/qemu-lifecycle-upgrade-health-test.sh proves all three
       # outcomes against the same running node: a "good" upgrade (the
-      # existing v1 rootfs, repackaged) must show haproxyosd's own
+      # existing v1 rootfs, repackaged) must show janusd's own
       # "confirmed healthy" and never revert; a "broken" one (a fresh
       # rootfs with the host's own dynamically-linked /bin/false
-      # standing in for haproxyosd itself - no dynamic linker/libc in
+      # standing in for janusd itself - no dynamic linker/libc in
       # this rootfs at all, so every restart attempt fails at spawn()
       # itself) must reboot into it, then autonomously give up via
       # Supervisor's own backstop and revert; and a third
-      # "haproxy-broken" one (real haproxyosd, but /bin/false standing
-      # in for *haproxy* this time) must show haproxyosd itself starting
+      # "haproxy-broken" one (real janusd, but /bin/false standing
+      # in for *haproxy* this time) must show janusd itself starting
       # fine and beginning its own confirmation attempt, then
       # autonomously reverting via its own real health check - proving
       # the two mechanisms are genuinely independent, not just one
@@ -577,13 +577,13 @@ jobs:
       # image/disk/assemble.sh itself produces at build time), and
       # Install never builds a UKI either, just picks both slots' pre-
       # built ones from the same kind of release bundle Upgrade already
-      # reads from. Refuses a disk that already looks like a HAProxyOS
+      # reads from. Refuses a disk that already looks like a Janus
       # install, and the disk this node is itself currently booted from
       # (Upgrade's territory, and repartitioning it live would be
       # catastrophic) - never reboots anything on success, since the
       # disk it wrote isn't necessarily the one this node runs from.
       # hack/lifecycle-install-test.sh is the one lifecycle test here
-      # where the RPC call itself doesn't run inside a VM - haproxyosd
+      # where the RPC call itself doesn't run inside a VM - janusd
       # runs natively on the runner (same pattern the "HAProxy gRPC API
       # integration test" step above already uses), since Install has no
       # A/B/STATE machinery of its own to need a VM for; only the
@@ -651,12 +651,12 @@ jobs:
       - name: Build an alpha Proxmox VM image (qcow2)
         run: |
           make proxmox-image
-          ls -lh build/haproxyos.qcow2
+          ls -lh build/janus.qcow2
       - name: Upload the alpha Proxmox VM image
         uses: actions/upload-artifact@v4
         with:
-          name: haproxyos-alpha-${{ github.sha }}
-          path: build/haproxyos.qcow2
+          name: janus-alpha-${{ github.sha }}
+          path: build/janus.qcow2
           retention-days: 30
 
       # TODO(Phase 3 cont'd): image/iso, image/vmware, upload artifacts

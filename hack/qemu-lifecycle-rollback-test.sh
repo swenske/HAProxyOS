@@ -11,14 +11,14 @@
 #   2. extract ca.crt/admin.crt/admin.key straight from disk.img's
 #      STATE partition (partition 6) via `debugfs dump`, entirely
 #      offline (no mount, no loop device, same reasoning as
-#      hack/qemu-state-persist-test.sh's own debugfs use) - haproxyosd
-#      does print all three (CA cert included, see cmd/haproxyosd/
+#      hack/qemu-state-persist-test.sh's own debugfs use) - janusd
+#      does print all three (CA cert included, see cmd/janusd/
 #      main.go) to the console once, on first boot, but a script can't
 #      watch a live console the way a human doing this for real would,
 #      so this reads them the way a real out-of-band provisioning step
 #      could too: from the STATE partition directly, before or without
 #      ever touching the console.
-#   3. call `haproxyosctl lifecycle rollback` over real mTLS, against
+#   3. call `janusctl lifecycle rollback` over real mTLS, against
 #      the running node's gRPC port - must return "active slot: B".
 #   4. this QEMU instance is run WITHOUT -no-reboot, unlike every other
 #      boot test here: the whole point is to watch the guest actually
@@ -28,26 +28,26 @@
 #      reboot cycle, not just that the RPC returned successfully.
 #   5. after the second boot, HTTP must answer again, the console's own
 #      dm-mod.create= line must now reference /dev/vda4 (slot B, not
-#      slot A), and haproxyosd's "first boot" line must NOT appear
+#      slot A), and janusd's "first boot" line must NOT appear
 #      again - STATE (the CA the first boot generated) survived the
 #      reboot, same invariant hack/qemu-uefi-ab-boot-test.sh already
 #      proves for the build-tool-driven switch, now proved for the
 #      real API-driven one too.
 #
-# Usage: hack/qemu-lifecycle-rollback-test.sh <disk.img> <haproxyosctl-bin>
+# Usage: hack/qemu-lifecycle-rollback-test.sh <disk.img> <janusctl-bin>
 set -euo pipefail
 
 # debugfs (e2fsprogs) installs to /usr/sbin, same PATH gap already hit
-# for veritysetup/mkfs.ext4/mkfs.vfat/sgdisk on haproxyos-runner01.
+# for veritysetup/mkfs.ext4/mkfs.vfat/sgdisk on janus-runner01.
 export PATH="$PATH:/usr/sbin:/sbin"
 
-DISK="${1:?usage: $0 <disk.img> <haproxyosctl-bin>}"
-CTL="${2:?usage: $0 <disk.img> <haproxyosctl-bin>}"
+DISK="${1:?usage: $0 <disk.img> <janusctl-bin>}"
+CTL="${2:?usage: $0 <disk.img> <janusctl-bin>}"
 HTTP_TIMEOUT_SECS="${QEMU_ROLLBACK_HTTP_TIMEOUT:-40}"
 REBOOT_TIMEOUT_SECS="${QEMU_ROLLBACK_REBOOT_TIMEOUT:-60}"
 HOST_HTTP_PORT="${QEMU_ROLLBACK_HTTP_PORT:-18090}"
 HOST_GRPC_PORT="${QEMU_ROLLBACK_GRPC_PORT:-18091}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
@@ -101,9 +101,9 @@ fi
 echo "Slot A OK: real UEFI boot, HTTP 200, PKI bootstrapped"
 
 # --- extract PKI material straight from disk.img's STATE partition -
-# safe to read concurrently with the still-running guest: haproxyosd's
+# safe to read concurrently with the still-running guest: janusd's
 # PKI bootstrap calls syscall.Sync() before it even starts listening
-# (see cmd/haproxyosd/main.go), and HTTP 200 above already proves the
+# (see cmd/janusd/main.go), and HTTP 200 above already proves the
 # listener is up, so those writes are already visible through the host
 # page cache backing this same disk.img file. ---
 STATE_START_SECTOR="$(sgdisk -i 6 "$DISK" | awk -F': ' '/^First sector/ {print $2}' | awk '{print $1}')"
@@ -120,7 +120,7 @@ done
 ROLLBACK_OUT="$("$CTL" -endpoint "127.0.0.1:${HOST_GRPC_PORT}" -ca "$WORKDIR/ca.crt" -cert "$WORKDIR/admin.crt" -key "$WORKDIR/admin.key" lifecycle rollback)"
 echo "$ROLLBACK_OUT"
 if ! echo "$ROLLBACK_OUT" | grep -q "slot B"; then
-  echo "Rollback test FAILED: haproxyosctl lifecycle rollback didn't report switching to slot B" >&2
+  echo "Rollback test FAILED: janusctl lifecycle rollback didn't report switching to slot B" >&2
   exit 1
 fi
 

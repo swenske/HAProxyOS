@@ -7,7 +7,7 @@
 # design). Built with mtools (mformat/mmd/mcopy) directly against the
 # image file - no mount, no loop device, same reasoning as
 # rootfs/state-image.sh and image/disk/assemble.sh (loop devices aren't
-# available on haproxyos-runner01).
+# available on janus-runner01).
 #
 # Usage: image/uki/esp-image.sh <out-file> <uki.efi> <size-mb>
 set -euo pipefail

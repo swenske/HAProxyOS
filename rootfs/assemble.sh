@@ -5,7 +5,7 @@
 # PATH - neither needs root privileges for this (only mounting/verifying
 # a *live* dm-verity device does).
 #
-# Usage: rootfs/assemble.sh <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>
+# Usage: rootfs/assemble.sh <out-dir> <init-bin> <janusd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>
 #
 # Writes to <out-dir>:
 #   rootfs.squashfs   - the read-only root filesystem image
@@ -18,13 +18,13 @@ set -euo pipefail
 
 # Debian installs veritysetup (cryptsetup-bin) to /usr/sbin, which isn't
 # guaranteed to be on PATH for a non-interactive/non-root shell even once
-# the package is installed - confirmed on haproxyos-runner01, where this
+# the package is installed - confirmed on janus-runner01, where this
 # script's own `mksquashfs` call (installed to /usr/bin, always on PATH)
 # succeeded but `veritysetup` failed with "command not found" despite
 # `apt-get install cryptsetup-bin` having just run cleanly in the same job.
 export PATH="$PATH:/usr/sbin:/sbin"
 
-USAGE="usage: $0 <out-dir> <init-bin> <haproxyosd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>"
+USAGE="usage: $0 <out-dir> <init-bin> <janusd-bin> <haproxy-bin> <haproxy-cfg> <selinux-policy>"
 OUT_DIR="${1:?$USAGE}"
 INIT_BIN="${2:?$USAGE}"
 DAEMON_BIN="${3:?$USAGE}"
@@ -37,10 +37,10 @@ trap 'rm -rf "$WORKDIR"' EXIT
 
 mkdir -p "$WORKDIR"/{proc,sys,dev,run,var,tmp,sbin,usr/local/sbin,etc/haproxy,etc/selinux}
 install -m 0755 "$INIT_BIN" "$WORKDIR/sbin/init"
-install -m 0755 "$DAEMON_BIN" "$WORKDIR/sbin/haproxyosd"
+install -m 0755 "$DAEMON_BIN" "$WORKDIR/sbin/janusd"
 install -m 0755 "$HAPROXY_BIN" "$WORKDIR/usr/local/sbin/haproxy"
 install -m 0644 "$HAPROXY_CFG" "$WORKDIR/etc/haproxy/haproxy.cfg"
-install -m 0644 "$SELINUX_POLICY" "$WORKDIR/etc/selinux/hapos.policy"
+install -m 0644 "$SELINUX_POLICY" "$WORKDIR/etc/selinux/janus.policy"
 # /run, /var, /tmp stay empty in the image itself; Phase 3's ephemeral
 # overlay (not implemented yet) is what makes them writable on a booted
 # node.
@@ -48,7 +48,7 @@ install -m 0644 "$SELINUX_POLICY" "$WORKDIR/etc/selinux/hapos.policy"
 # Phase 4 cont'd (SELinux): the only three files on this rootfs whose
 # type actually needs to be more specific than selinux/policy.conf's own
 # fs_use_xattr default (squashfs_t) - the three real executables, so
-# rootfs/init's own domain transitions (init_t -> haproxyosd_t ->
+# rootfs/init's own domain transitions (init_t -> janusd_t ->
 # haproxy_t) have something to key off. Labeled via mksquashfs's own
 # pseudo-file `x` action (below), not a plain `setfattr` on the source
 # tree before mksquashfs runs, which turned out not to work at all here:
@@ -73,7 +73,7 @@ mkdir -p "$OUT_DIR"
 # very first build of this script and inspecting it - `ls` on the
 # mounted root as non-root failed outright).
 #
-# The chroot jail (see cmd/haproxyosd's -haproxy-chroot-dir) is added as
+# The chroot jail (see cmd/janusd's -haproxy-chroot-dir) is added as
 # a pseudo file entry - mode 0000, not even readable by its own owner -
 # rather than a real mkdir+chmod 000 in $WORKDIR: a genuinely
 # unreadable/unenterable directory can't be read back by mksquashfs
@@ -83,7 +83,7 @@ mkdir -p "$OUT_DIR"
 mksquashfs "$WORKDIR" "$OUT_DIR/rootfs.squashfs" -noappend -comp xz -all-root -root-mode 0755 \
   -p "var/empty D 0 0000 0 0" \
   -p "sbin/init x security.selinux=system_u:object_r:init_exec_t" \
-  -p "sbin/haproxyosd x security.selinux=system_u:object_r:haproxyosd_exec_t" \
+  -p "sbin/janusd x security.selinux=system_u:object_r:janusd_exec_t" \
   -p "usr/local/sbin/haproxy x security.selinux=system_u:object_r:haproxy_exec_t"
 
 veritysetup format "$OUT_DIR/rootfs.squashfs" "$OUT_DIR/rootfs.verity" > "$OUT_DIR/rootfs.verity.info"

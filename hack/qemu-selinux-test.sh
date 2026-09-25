@@ -17,7 +17,7 @@
 # Runs two boots against the same squashfs+dm-verity image (see
 # hack/qemu-verity-boot-test.sh, which this shares its boot pattern
 # with):
-#   1. the kernel's own default (kernel/configs/haproxyos_defconfig's
+#   1. the kernel's own default (kernel/configs/janus_defconfig's
 #      SECURITY_SELINUX_DEVELOP=y keeps this permissive unless told
 #      otherwise) - must show the policy actually loading
 #      ("init: selinux: loaded policy"), must show real HTTP 200 (proves

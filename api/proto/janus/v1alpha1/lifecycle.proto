@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package haproxyos.v1alpha1;
+package janus.v1alpha1;
 
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+option go_package = "github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1";
 
 // LifecycleService handles installation, upgrade and rollback: writing a
 // new immutable image to the inactive A/B slot, switching the bootloader
@@ -47,7 +47,7 @@ message InstallRequest {
   ImageSource source = 1;
   // Target disk, e.g. "/dev/sda" - not necessarily the disk this node
   // itself booted from (rejected if it is; that's Upgrade's territory).
-  // Fails if the disk already has a HAProxyOS install (use
+  // Fails if the disk already has a Janus install (use
   // Rollback/Upgrade instead).
   string disk = 2;
 }

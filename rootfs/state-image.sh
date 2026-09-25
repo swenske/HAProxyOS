@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Creates a blank, pre-formatted ext4 image for HAProxyOS's persistent
-# STATE partition (currently just /etc/haproxyos/pki - the one thing
+# Creates a blank, pre-formatted ext4 image for Janus's persistent
+# STATE partition (currently just /etc/janus/pki - the one thing
 # that needs to survive a reboot; rootfs/init/main.go's ephemeral tmpfs
 # overlay wipes everything else). Formatted here, at build time, not on
 # the target - the "no package manager on the node" rule means no
@@ -12,7 +12,7 @@ set -euo pipefail
 
 # Debian installs mkfs.ext4 (e2fsprogs) to /usr/sbin, same as
 # veritysetup (cryptsetup-bin) - see rootfs/assemble.sh's own PATH fix
-# and CLAUDE.md for why this is needed on haproxyos-runner01's
+# and CLAUDE.md for why this is needed on janus-runner01's
 # non-interactive shell even though the package installs cleanly.
 export PATH="$PATH:/usr/sbin:/sbin"
 
@@ -20,6 +20,6 @@ OUT="${1:?usage: $0 <out-file> <size-mb>}"
 SIZE_MB="${2:?usage: $0 <out-file> <size-mb>}"
 
 truncate -s "${SIZE_MB}M" "$OUT"
-mkfs.ext4 -q -F -L haproxyos-state "$OUT"
+mkfs.ext4 -q -F -L janus-state "$OUT"
 
-echo "Wrote $OUT (${SIZE_MB}MiB, blank ext4, label haproxyos-state)"
+echo "Wrote $OUT (${SIZE_MB}MiB, blank ext4, label janus-state)"

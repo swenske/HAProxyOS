@@ -14,7 +14,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
 )
 
 // TestRequiredRolesCoversEveryRPC registers every service against a real
@@ -25,10 +25,10 @@ import (
 // behind after an RPC is renamed or removed.
 func TestRequiredRolesCoversEveryRPC(t *testing.T) {
 	srv := grpc.NewServer()
-	haproxyosv1alpha1.RegisterSystemServiceServer(srv, &System{})
-	haproxyosv1alpha1.RegisterLifecycleServiceServer(srv, &Lifecycle{})
-	haproxyosv1alpha1.RegisterHAProxyServiceServer(srv, &HAProxy{})
-	haproxyosv1alpha1.RegisterNetworkServiceServer(srv, &Network{})
+	janusv1alpha1.RegisterSystemServiceServer(srv, &System{})
+	janusv1alpha1.RegisterLifecycleServiceServer(srv, &Lifecycle{})
+	janusv1alpha1.RegisterHAProxyServiceServer(srv, &HAProxy{})
+	janusv1alpha1.RegisterNetworkServiceServer(srv, &Network{})
 
 	seen := map[string]bool{}
 	for serviceName, info := range srv.GetServiceInfo() {
@@ -56,11 +56,11 @@ func TestCheckRole(t *testing.T) {
 	})
 
 	tests := []struct {
-		name       string
-		method     string
-		peerRoles  []string
-		noPeer     bool
-		wantCode   codes.Code
+		name      string
+		method    string
+		peerRoles []string
+		noPeer    bool
+		wantCode  codes.Code
 	}{
 		{name: "admin can call admin-only", method: "/test.Service/AdminOnly", peerRoles: []string{"os:admin"}, wantCode: codes.OK},
 		{name: "reader cannot call admin-only", method: "/test.Service/AdminOnly", peerRoles: []string{"os:reader"}, wantCode: codes.PermissionDenied},

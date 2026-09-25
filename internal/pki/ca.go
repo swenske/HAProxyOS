@@ -1,4 +1,4 @@
-// Package pki is HAProxyOS's minimal internal certificate authority: one
+// Package pki is Janus's minimal internal certificate authority: one
 // self-signed CA per node, used to issue the node's own gRPC server
 // certificate and short-lived client certificates (see
 // SystemService.GenerateClientConfiguration). Every certificate is
@@ -42,7 +42,7 @@ const (
 	caKeyPEMType   = "PRIVATE KEY"
 	caCertPEMType  = "CERTIFICATE"
 	caValidity     = 10 * 365 * 24 * time.Hour // 10 years - this is the trust root, not meant to rotate casually
-	leafValidity   = 365 * 24 * time.Hour       // 1 year - no rotation/renewal flow yet (Phase 2+ gap, see docs)
+	leafValidity   = 365 * 24 * time.Hour      // 1 year - no rotation/renewal flow yet (Phase 2+ gap, see docs)
 	serialBitsSize = 128
 )
 

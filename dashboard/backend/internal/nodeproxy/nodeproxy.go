@@ -30,10 +30,10 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
-	"github.com/swenske/HAProxyOS/internal/pki"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
+	"github.com/swenske/Janus/internal/pki"
 
-	"github.com/swenske/HAProxyOS/dashboard/backend/internal/store"
+	"github.com/swenske/Janus/dashboard/backend/internal/store"
 )
 
 // staticFiles is the entire per-node dashboard view - deliberately
@@ -162,7 +162,7 @@ func handleInfo(w http.ResponseWriter, r *http.Request, node *store.Node) {
 	}
 	defer conn.Close()
 
-	client := haproxyosv1alpha1.NewSystemServiceClient(conn)
+	client := janusv1alpha1.NewSystemServiceClient(conn)
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 

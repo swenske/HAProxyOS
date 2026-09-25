@@ -3,7 +3,7 @@
 # Fetches and verifies the pinned kernel source (see ../versions.mk),
 # provides a "config" stage used interactively by `make kernel-menuconfig`
 # (see ../Makefile) to run `make menuconfig`, a "build" stage that compiles
-# bzImage from configs/haproxyos_defconfig, and an "export" stage
+# bzImage from configs/janus_defconfig, and an "export" stage
 # (`FROM scratch`) that holds just the resulting bzImage so
 # `docker build --target export --output type=local,dest=<dir>` can pull it
 # out without a container filesystem attached.
@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libncurses-dev flex bison bc libelf-dev \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src/linux-${KERNEL_VERSION}
-COPY configs/haproxyos_defconfig .config
+COPY configs/janus_defconfig .config
 CMD ["make", "menuconfig"]
 
 FROM config AS build

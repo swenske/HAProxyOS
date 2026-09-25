@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: haproxyos/v1alpha1/lifecycle.proto
+// source: janus/v1alpha1/lifecycle.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	context "context"
@@ -20,9 +20,9 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	LifecycleService_Install_FullMethodName  = "/haproxyos.v1alpha1.LifecycleService/Install"
-	LifecycleService_Upgrade_FullMethodName  = "/haproxyos.v1alpha1.LifecycleService/Upgrade"
-	LifecycleService_Rollback_FullMethodName = "/haproxyos.v1alpha1.LifecycleService/Rollback"
+	LifecycleService_Install_FullMethodName  = "/janus.v1alpha1.LifecycleService/Install"
+	LifecycleService_Upgrade_FullMethodName  = "/janus.v1alpha1.LifecycleService/Upgrade"
+	LifecycleService_Rollback_FullMethodName = "/janus.v1alpha1.LifecycleService/Rollback"
 )
 
 // LifecycleServiceClient is the client API for LifecycleService service.
@@ -227,7 +227,7 @@ func _LifecycleService_Rollback_Handler(srv interface{}, ctx context.Context, de
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var LifecycleService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "haproxyos.v1alpha1.LifecycleService",
+	ServiceName: "janus.v1alpha1.LifecycleService",
 	HandlerType: (*LifecycleServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -247,5 +247,5 @@ var LifecycleService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "haproxyos/v1alpha1/lifecycle.proto",
+	Metadata: "janus/v1alpha1/lifecycle.proto",
 }

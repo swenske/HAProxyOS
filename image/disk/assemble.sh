@@ -74,8 +74,8 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 # assemble.sh - squashfs+verity+two UKIs, together a few 10s of MiB)
 # has nowhere else already-writable and already-reachable from inside
 # a running node to land before installing - see hack/
-# qemu-lifecycle-upgrade-test.sh for exactly why (haproxyosctl and
-# haproxyosd don't share a filesystem across the QEMU host/guest
+# qemu-lifecycle-upgrade-test.sh for exactly why (janusctl and
+# janusd don't share a filesystem across the QEMU host/guest
 # boundary the way CLAUDE.md's own "-ca/-cert/-key ... handy when ctl
 # and daemon share a filesystem" convenience assumes they normally do).
 ESP_MB=64

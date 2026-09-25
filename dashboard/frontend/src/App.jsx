@@ -244,7 +244,7 @@ export default function App() {
 
   return (
     <main>
-      <h1>HAProxyOS Dashboard</h1>
+      <h1>Janus Controller</h1>
       {error && <p className="error">{error}</p>}
       {loading ? <p>Loading…</p> : <NodeList nodes={nodes} onRemove={remove} busy={busy} />}
       <AddNodeForm onAdded={refresh} />

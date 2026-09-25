@@ -1,11 +1,11 @@
 include versions.mk
 
-MODULE  := github.com/swenske/HAProxyOS
+MODULE  := github.com/swenske/Janus
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
 BIN_DIR   := bin
-BINARIES  := haproxyosd haproxyosctl
+BINARIES  := janusd janusctl
 BUILD_DIR := build
 
 GEN_DIR := gen
@@ -38,7 +38,7 @@ vet:
 lint:
 	golangci-lint run ./...
 
-# Regenerates gen/haproxyos/v1alpha1 from api/proto/**.proto. Requires buf
+# Regenerates gen/janus/v1alpha1 from api/proto/**.proto. Requires buf
 # and the protoc-gen-go/protoc-gen-go-grpc plugins on PATH (`go install
 # google.golang.org/protobuf/cmd/protoc-gen-go@latest` and
 # `google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest`, plus
@@ -54,21 +54,21 @@ clean:
 
 # Opens an interactive `make menuconfig` inside a throwaway container built
 # from kernel/Dockerfile's "config" stage, seeded from the currently
-# committed kernel/configs/haproxyos_defconfig, and writes the resulting
+# committed kernel/configs/janus_defconfig, and writes the resulting
 # defconfig back out so it can be reviewed with `git diff` and committed.
 # This is the whole "module selection" workflow for Phase 0/1 - a Proxmox-
 # hosted UI wrapping the same container is Phase 6, not required to get
 # started.
 kernel-menuconfig:
-	docker build --target config -t haproxyos-kernel-config \
+	docker build --target config -t janus-kernel-config \
 		--build-arg KERNEL_VERSION=$(KERNEL_VERSION) kernel
 	docker run --rm -it \
 		-v "$(CURDIR)/kernel/configs:/out" \
-		haproxyos-kernel-config \
-		sh -c 'make menuconfig && cp .config /out/haproxyos_defconfig'
-	@echo "Updated kernel/configs/haproxyos_defconfig - review with 'git diff' and commit."
+		janus-kernel-config \
+		sh -c 'make menuconfig && cp .config /out/janus_defconfig'
+	@echo "Updated kernel/configs/janus_defconfig - review with 'git diff' and commit."
 
-# Builds bzImage from kernel/configs/haproxyos_defconfig via kernel/
+# Builds bzImage from kernel/configs/janus_defconfig via kernel/
 # Dockerfile's "export" stage (needs Docker Buildx - `docker buildx
 # version` to check) and pulls it out to build/bzImage.
 kernel-build:
@@ -102,22 +102,22 @@ haproxy-build:
 	docker build --target export --build-arg HAPROXY_VERSION=$(HAPROXY_VERSION) \
 		-o $(BUILD_DIR) pkgs/haproxy
 
-# Builds haproxyosd as a static binary (CGO_ENABLED=0, same reasoning as
+# Builds janusd as a static binary (CGO_ENABLED=0, same reasoning as
 # `init`) for packaging into the initramfs - separate from `build`'s
-# bin/haproxyosd, which doesn't force CGO off since it only needs to run
+# bin/janusd, which doesn't force CGO off since it only needs to run
 # on the build host there, not on the target kernel.
 daemon-static:
 	mkdir -p $(BUILD_DIR)
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "$(LDFLAGS)" \
-		-o $(BUILD_DIR)/haproxyosd ./cmd/haproxyosd
+		-o $(BUILD_DIR)/janusd ./cmd/janusd
 
-# The Phase 2 network-integration rootfs: init + haproxyosd + the real
+# The Phase 2 network-integration rootfs: init + janusd + the real
 # static haproxy binary + the bootstrap config (see rootfs/base/etc/
-# haproxy/haproxy.cfg). rootfs/init detects haproxyosd's presence and
+# haproxy/haproxy.cfg). rootfs/init detects janusd's presence and
 # supervises it instead of powering off - see rootfs/init/main.go.
 initramfs-full: init daemon-static haproxy-build
 	./hack/build-initramfs.sh $(BUILD_DIR)/init $(BUILD_DIR)/initramfs-full.cpio.gz \
-		$(BUILD_DIR)/haproxyosd:sbin/haproxyosd \
+		$(BUILD_DIR)/janusd:sbin/janusd \
 		$(BUILD_DIR)/haproxy:usr/local/sbin/haproxy \
 		rootfs/base/etc/haproxy/haproxy.cfg:etc/haproxy/haproxy.cfg
 
@@ -131,7 +131,7 @@ qemu-network-test: kernel-build initramfs-full
 # Phase 4: proves rootfs/init/main.go's hardenSysctls actually applies
 # every kernel-hardening sysctl it claims to on a real boot (not just
 # that the Go code runs without panicking, and not just that the
-# matching kernel/configs/haproxyos_defconfig options compile in - see
+# matching kernel/configs/janus_defconfig options compile in - see
 # hack/qemu-hardening-test.sh's own comment for the real gap that
 # distinction caught: CONFIG_SYN_COOKIES missing, silently failing only
 # the tcp_syncookies write while every other sysctl and the boot itself
@@ -139,7 +139,7 @@ qemu-network-test: kernel-build initramfs-full
 qemu-hardening-test: kernel-build initramfs-full
 	./hack/qemu-hardening-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/initramfs-full.cpio.gz
 
-# Phase 3: builds a squashfs image of the real rootfs (init + haproxyosd +
+# Phase 3: builds a squashfs image of the real rootfs (init + janusd +
 # haproxy + bootstrap config, same content as initramfs-full but as a
 # proper filesystem image instead of a cpio archive) and its dm-verity
 # hash tree (see rootfs/assemble.sh). Requires mksquashfs (squashfs-tools)
@@ -158,9 +158,9 @@ selinux-policy:
 
 rootfs-build: init daemon-static haproxy-build selinux-policy
 	mkdir -p $(BUILD_DIR)/rootfs
-	./rootfs/assemble.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/init $(BUILD_DIR)/haproxyosd \
+	./rootfs/assemble.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/init $(BUILD_DIR)/janusd \
 		$(BUILD_DIR)/haproxy rootfs/base/etc/haproxy/haproxy.cfg \
-		$(BUILD_DIR)/selinux/hapos.policy
+		$(BUILD_DIR)/selinux/janus.policy
 
 # Phase 3 cont'd: boots the kernel directly from rootfs-build's
 # squashfs+dm-verity image via the "dm-mod.create=" cmdline parameter
@@ -185,7 +185,7 @@ qemu-selinux-test: kernel-build rootfs-build
 	./hack/qemu-selinux-test.sh $(BUILD_DIR)/bzImage $(BUILD_DIR)/rootfs
 
 # Phase 3 cont'd: builds a blank, pre-formatted ext4 image for the
-# persistent STATE partition (/etc/haproxyos/pki, /etc/haproxy, and -
+# persistent STATE partition (/etc/janus/pki, /etc/haproxy, and -
 # until real OCI/HTTPS image distribution exists - a staging area for
 # LifecycleService.Upgrade's release bundles too, see image/disk/
 # assemble.sh's own STATE_MB comment for why) - formatted here, at
@@ -201,7 +201,7 @@ state-image:
 # Phase 3 cont'd: proves the STATE partition actually persists across a
 # reboot, not just that it can be mounted - boots the same dm-verity
 # image twice against the *same* state.img (a third, writable virtio-blk
-# drive, unlike the two read-only root drives), and checks haproxyosd's
+# drive, unlike the two read-only root drives), and checks janusd's
 # own "first boot" log line appears on the first boot and does NOT
 # reappear on the second - see hack/qemu-state-persist-test.sh.
 qemu-state-persist-test: kernel-build rootfs-build state-image
@@ -230,7 +230,7 @@ disk-image: kernel-build rootfs-build state-image
 # qemu-img on top of disk-image's own tools. See
 # image/kvm-proxmox/assemble.sh.
 proxmox-image: kernel-build rootfs-build state-image
-	./image/kvm-proxmox/assemble.sh $(BUILD_DIR)/haproxyos.qcow2 $(BUILD_DIR)/bzImage \
+	./image/kvm-proxmox/assemble.sh $(BUILD_DIR)/janus.qcow2 $(BUILD_DIR)/bzImage \
 		$(BUILD_DIR)/rootfs $(BUILD_DIR)/rootfs/state.img A
 
 # Phase 3 cont'd: proves both A/B slots of disk-image's single GPT disk
@@ -255,14 +255,14 @@ qemu-uefi-ab-boot-test: disk-image
 
 # Phase 3 cont'd: proves LifecycleService.Rollback (internal/api/
 # lifecycle.go) works over a real gRPC call against a running node -
-# boots slot A, calls `haproxyosctl lifecycle rollback` over real mTLS
+# boots slot A, calls `janusctl lifecycle rollback` over real mTLS
 # (credentials extracted straight from disk.img's STATE partition via
 # debugfs, not the console - see hack/qemu-lifecycle-rollback-test.sh
 # for why), and watches the guest genuinely reboot itself (no
 # -no-reboot this time) into slot B with STATE intact. Requires
-# haproxyosctl built (see `build`).
+# janusctl built (see `build`).
 qemu-lifecycle-rollback-test: build disk-image
-	./hack/qemu-lifecycle-rollback-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
+	./hack/qemu-lifecycle-rollback-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/janusctl
 
 # Dashboard prep, tranche 1: proves the SystemService RPCs the dashboard's
 # single-node view needs (Memory/CPUInfo/LoadAvg/DiskStats, plus
@@ -270,7 +270,7 @@ qemu-lifecycle-rollback-test: build disk-image
 # sane values from a real boot - see internal/api/system_stats.go and
 # hack/qemu-system-info-test.sh.
 qemu-system-info-test: build disk-image
-	./hack/qemu-system-info-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/haproxyosctl
+	./hack/qemu-system-info-test.sh $(BUILD_DIR)/rootfs/disk.img $(BIN_DIR)/janusctl
 
 # Dashboard prep, tranche 2: builds dashboardd (dashboard/backend) -
 # lives outside cmd/ (see the rebranding/dashboard/client-native plan:
@@ -279,7 +279,7 @@ qemu-system-info-test: build disk-image
 # Builds dashboard/frontend's React SPA straight into dashboard/backend/
 # static (vite.config.js's own outDir) - go:embed needs it there at `go
 # build` time. Requires npm. The build output is committed to the repo
-# (like gen/haproxyos/v1alpha1) so a plain `go build ./...` never needs
+# (like gen/janus/v1alpha1) so a plain `go build ./...` never needs
 # a Node.js toolchain just to compile - this target is for actually
 # picking up frontend source changes.
 dashboard-frontend-build:
@@ -305,7 +305,7 @@ qemu-dashboard-test: dashboard-build disk-image
 # the build context needs go.mod/gen/internal alongside dashboard/
 # itself.
 dashboard-image:
-	docker build -f dashboard/Dockerfile -t haproxyos-dashboard .
+	docker build -f dashboard/Dockerfile -t janus-controller .
 
 # Phase 3 cont'd: proves Secure Boot signing/enforcement actually works,
 # both directions - a UKI signed with a throwaway test key (image/
@@ -325,7 +325,7 @@ qemu-secureboot-test: kernel-build rootfs-build
 # *genuinely new* rootfs onto the inactive slot over a real gRPC call -
 # builds a second, genuinely different rootfs (different squashfs,
 # different root hash) and release bundle (image/release/assemble.sh)
-# on the fly, boots the existing disk.img, calls `haproxyosctl
+# on the fly, boots the existing disk.img, calls `janusctl
 # lifecycle upgrade` with the new bundle, and watches the guest
 # genuinely reboot itself into it - HTTP healthy again, STATE intact,
 # and the kernel's own cmdline confirming the new slot's partitions and
@@ -334,34 +334,34 @@ qemu-secureboot-test: kernel-build rootfs-build
 # qemu-lifecycle-upgrade-test.sh's own header comment for the real bug
 # that assumption caught) - then checks Rollback afterward still
 # correctly brings back the untouched original slot. Requires
-# haproxyosctl built (see `build`). See
+# janusctl built (see `build`). See
 # hack/qemu-lifecycle-upgrade-test.sh.
 qemu-lifecycle-upgrade-test: build disk-image
-	./hack/qemu-lifecycle-upgrade-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
+	./hack/qemu-lifecycle-upgrade-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/janusctl
 
 # Phase 3 cont'd: proves LifecycleService.Upgrade's wait_for_health -
 # a healthy new slot confirms (Supervisor.OnStable -> internal/
-# bootcommit's marker cleared) and stays; an unhealthy one (haproxyosd
+# bootcommit's marker cleared) and stays; an unhealthy one (janusd
 # built dynamically-linked into a rootfs with no libc/dynamic linker at
 # all, so it can never even exec - see hack/
 # qemu-lifecycle-upgrade-health-test.sh's own comment) reverts and
 # reboots back automatically (Supervisor.GiveUpAfter/OnGiveUp), with no
-# RPC call driving the revert itself. Requires haproxyosctl built (see
+# RPC call driving the revert itself. Requires janusctl built (see
 # `build`).
 qemu-lifecycle-upgrade-health-test: build disk-image
-	./hack/qemu-lifecycle-upgrade-health-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/haproxyosctl
+	./hack/qemu-lifecycle-upgrade-health-test.sh $(BUILD_DIR)/rootfs/disk.img $(BUILD_DIR)/bzImage $(BUILD_DIR) $(BIN_DIR)/janusctl
 
 # Phase 3 cont'd: proves LifecycleService.Install partitions a genuinely
 # blank disk from scratch (internal/diskimage + go-diskfs) and produces
-# a real, independently bootable image - haproxyosd runs *natively* on
+# a real, independently bootable image - janusd runs *natively* on
 # the host for the Install call itself (no A/B/STATE machinery of its
 # own to need a VM for, same pattern image-build.yml's own "HAProxy
 # gRPC API integration test" step already uses), then the result is
 # booted under real OVMF to confirm it. Requires root (sudo) for
 # haproxy's chroot() and for the go-diskfs GPT/filesystem writes.
-# Requires haproxyosctl built (see `build`).
+# Requires janusctl built (see `build`).
 lifecycle-install-test: build rootfs-build
-	./hack/lifecycle-install-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/bzImage $(BUILD_DIR)/haproxy $(BUILD_DIR)/haproxyosd $(BIN_DIR)/haproxyosctl
+	./hack/lifecycle-install-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/bzImage $(BUILD_DIR)/haproxy $(BUILD_DIR)/janusd $(BIN_DIR)/janusctl
 
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`
@@ -373,9 +373,9 @@ lifecycle-install-test: build rootfs-build
 # comment for how that was actually caught). Requires ukify
 # (systemd-ukify) and mtools/dosfstools.
 uki-image: kernel-build rootfs-build
-	./image/uki/assemble.sh $(BUILD_DIR)/rootfs/haproxyos.efi $(BUILD_DIR)/bzImage \
+	./image/uki/assemble.sh $(BUILD_DIR)/rootfs/janus.efi $(BUILD_DIR)/bzImage \
 		$(BUILD_DIR)/rootfs /dev/vdb /dev/vdc
-	./image/uki/esp-image.sh $(BUILD_DIR)/rootfs/esp.img $(BUILD_DIR)/rootfs/haproxyos.efi 64
+	./image/uki/esp-image.sh $(BUILD_DIR)/rootfs/esp.img $(BUILD_DIR)/rootfs/janus.efi 64
 
 # Phase 3 cont'd: proves the UKI actually boots under *real* UEFI
 # firmware (OVMF) - no QEMU -kernel/-append shortcut at all, unlike

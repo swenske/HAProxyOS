@@ -19,14 +19,14 @@ import (
 
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
 
-	"github.com/swenske/HAProxyOS/dashboard/backend/internal/store"
+	"github.com/swenske/Janus/dashboard/backend/internal/store"
 )
 
 func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 	mux.HandleFunc("/api/haproxy/info", func(w http.ResponseWriter, r *http.Request) {
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
 			return c.ShowInfo(ctx, &emptypb.Empty{})
 		})
 	})
@@ -34,7 +34,7 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 	mux.HandleFunc("/api/haproxy/config", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
+			withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
 				resp, err := c.GetConfig(ctx, &emptypb.Empty{})
 				if err != nil {
 					return nil, err
@@ -52,7 +52,7 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 	})
 
 	mux.HandleFunc("/api/haproxy/backends", func(w http.ResponseWriter, r *http.Request) {
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
 			return c.BackendList(ctx, &emptypb.Empty{})
 		})
 	})
@@ -75,14 +75,14 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 			http.Error(w, fmt.Sprintf("unknown state %q (want ready, drain, or maint)", req.State), http.StatusBadRequest)
 			return
 		}
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-			_, err := c.ServerSetState(ctx, &haproxyosv1alpha1.ServerSetStateRequest{Backend: req.Backend, Server: req.Server, State: state})
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+			_, err := c.ServerSetState(ctx, &janusv1alpha1.ServerSetStateRequest{Backend: req.Backend, Server: req.Server, State: state})
 			return struct{}{}, err
 		})
 	})
 
 	mux.HandleFunc("/api/haproxy/maps", func(w http.ResponseWriter, r *http.Request) {
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
 			return c.MapList(ctx, &emptypb.Empty{})
 		})
 	})
@@ -95,8 +95,8 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 		}
 		switch r.Method {
 		case http.MethodGet:
-			withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-				return c.MapGet(ctx, &haproxyosv1alpha1.MapGetRequest{Map: mapName})
+			withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+				return c.MapGet(ctx, &janusv1alpha1.MapGetRequest{Map: mapName})
 			})
 		case http.MethodPost:
 			var req struct {
@@ -107,8 +107,8 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 			if !decodeJSON(w, r, &req) {
 				return
 			}
-			withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-				_, err := c.MapUpdate(ctx, &haproxyosv1alpha1.MapUpdateRequest{Map: mapName, Key: req.Key, Value: req.Value, Delete: req.Delete})
+			withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+				_, err := c.MapUpdate(ctx, &janusv1alpha1.MapUpdateRequest{Map: mapName, Key: req.Key, Value: req.Value, Delete: req.Delete})
 				return struct{}{}, err
 			})
 		default:
@@ -129,8 +129,8 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 		if !decodeJSON(w, r, &req) {
 			return
 		}
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-			_, err := c.ACLUpdate(ctx, &haproxyosv1alpha1.ACLUpdateRequest{Acl: aclName, Value: req.Value, Delete: req.Delete})
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+			_, err := c.ACLUpdate(ctx, &janusv1alpha1.ACLUpdateRequest{Acl: aclName, Value: req.Value, Delete: req.Delete})
 			return struct{}{}, err
 		})
 	})
@@ -138,7 +138,7 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 	mux.HandleFunc("/api/haproxy/certs", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
-			withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
+			withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
 				return c.CertificateList(ctx, &emptypb.Empty{})
 			})
 		case http.MethodPost:
@@ -151,8 +151,8 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 			if !decodeJSON(w, r, &req) {
 				return
 			}
-			withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-				_, err := c.CertificateUpload(ctx, &haproxyosv1alpha1.CertificateUploadRequest{
+			withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+				_, err := c.CertificateUpload(ctx, &janusv1alpha1.CertificateUploadRequest{
 					Name: req.Name, PemBundle: []byte(req.PEMBundle), CrtList: req.CrtList, Sni: req.SNI,
 				})
 				return struct{}{}, err
@@ -168,8 +168,8 @@ func registerOpsRoutes(mux *http.ServeMux, node *store.Node) {
 			http.Error(w, "usage: DELETE /api/haproxy/certs/{name}[?crt_list=...]", http.StatusBadRequest)
 			return
 		}
-		withHAProxyClient(w, r, node, func(ctx context.Context, c haproxyosv1alpha1.HAProxyServiceClient) (any, error) {
-			_, err := c.CertificateDelete(ctx, &haproxyosv1alpha1.CertificateDeleteRequest{Name: name, CrtList: r.URL.Query().Get("crt_list")})
+		withHAProxyClient(w, r, node, func(ctx context.Context, c janusv1alpha1.HAProxyServiceClient) (any, error) {
+			_, err := c.CertificateDelete(ctx, &janusv1alpha1.CertificateDeleteRequest{Name: name, CrtList: r.URL.Query().Get("crt_list")})
 			return struct{}{}, err
 		})
 	})
@@ -198,13 +198,13 @@ func handleApplyConfig(w http.ResponseWriter, r *http.Request, node *store.Node)
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
-	stream, err := haproxyosv1alpha1.NewHAProxyServiceClient(conn).ApplyConfig(ctx, &haproxyosv1alpha1.ApplyConfigRequest{Config: []byte(req.Config)})
+	stream, err := janusv1alpha1.NewHAProxyServiceClient(conn).ApplyConfig(ctx, &janusv1alpha1.ApplyConfigRequest{Config: []byte(req.Config)})
 	if err != nil {
 		http.Error(w, fmt.Sprintf("ApplyConfig: %v", err), http.StatusBadGateway)
 		return
 	}
 
-	var last *haproxyosv1alpha1.ApplyConfigResponse
+	var last *janusv1alpha1.ApplyConfigResponse
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
@@ -228,14 +228,14 @@ func handleApplyConfig(w http.ResponseWriter, r *http.Request, node *store.Node)
 	}{Stage: last.GetStage(), Message: last.GetMessage(), Accepted: last.GetAccepted()})
 }
 
-func serverStateFromString(s string) (haproxyosv1alpha1.ServerSetStateRequest_State, bool) {
+func serverStateFromString(s string) (janusv1alpha1.ServerSetStateRequest_State, bool) {
 	switch s {
 	case "ready":
-		return haproxyosv1alpha1.ServerSetStateRequest_STATE_READY, true
+		return janusv1alpha1.ServerSetStateRequest_STATE_READY, true
 	case "drain":
-		return haproxyosv1alpha1.ServerSetStateRequest_STATE_DRAIN, true
+		return janusv1alpha1.ServerSetStateRequest_STATE_DRAIN, true
 	case "maint":
-		return haproxyosv1alpha1.ServerSetStateRequest_STATE_MAINT, true
+		return janusv1alpha1.ServerSetStateRequest_STATE_MAINT, true
 	default:
 		return 0, false
 	}
@@ -244,7 +244,7 @@ func serverStateFromString(s string) (haproxyosv1alpha1.ServerSetStateRequest_St
 // withHAProxyClient dials node, runs call, and writes the result (or
 // error) as JSON - the shared plumbing every handler above uses so the
 // dial/error-handling logic isn't repeated a dozen times.
-func withHAProxyClient(w http.ResponseWriter, r *http.Request, node *store.Node, call func(context.Context, haproxyosv1alpha1.HAProxyServiceClient) (any, error)) {
+func withHAProxyClient(w http.ResponseWriter, r *http.Request, node *store.Node, call func(context.Context, janusv1alpha1.HAProxyServiceClient) (any, error)) {
 	conn, err := dialNode(node)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("dial node: %v", err), http.StatusBadGateway)
@@ -255,7 +255,7 @@ func withHAProxyClient(w http.ResponseWriter, r *http.Request, node *store.Node,
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
 
-	resp, err := call(ctx, haproxyosv1alpha1.NewHAProxyServiceClient(conn))
+	resp, err := call(ctx, janusv1alpha1.NewHAProxyServiceClient(conn))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)
 		return

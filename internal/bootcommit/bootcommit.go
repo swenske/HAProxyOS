@@ -5,16 +5,16 @@
 // independent mechanisms watch it from there on, each catching a
 // failure mode the other can't:
 //
-//   - cmd/haproxyosd, once it starts, calls Confirm (below) against a
+//   - cmd/janusd, once it starts, calls Confirm (below) against a
 //     real HAProxy health signal (its own stats socket responding, via
 //     internal/haproxy.Manager.ShowInfo) - not just "this process is
 //     still running", which says nothing about whether HAProxy itself
 //     ever came up. This is the primary, meaningful check.
 //   - rootfs/init's own Supervisor.GiveUpAfter/OnGiveUp
 //     (rootfs/init/main.go) bounds how long it keeps restarting a
-//     haproxyosd that crashes too fast, or too often, to ever reach the
+//     janusd that crashes too fast, or too often, to ever reach the
 //     point of running its own Confirm loop at all - the one failure
-//     mode cmd/haproxyosd can't catch, since it requires haproxyosd to
+//     mode cmd/janusd can't catch, since it requires janusd to
 //     actually be executing. checkBootCommit's own cross-boot
 //     TriesLeft tracking is this mechanism's backstop in turn, for a
 //     boot too broken (a kernel panic, say) for even Supervisor to run.
@@ -39,7 +39,7 @@ import (
 // pki/ and haproxy/ already use, so the marker survives exactly the
 // reboot it exists to detect a failure across. A var, not a const, so
 // tests can point it at a temp directory instead of the real path.
-var Dir = "/etc/haproxyos/boot"
+var Dir = "/etc/janus/boot"
 
 const markerFile = "pending.json"
 
@@ -59,7 +59,7 @@ type Marker struct {
 	// which case the boot after *that* one - finding TriesLeft already
 	// at 0 - triggers the revert without giving Slot yet another try.
 	TriesLeft int `json:"tries_left"`
-	// HealthTimeoutSeconds, if set, is how long cmd/haproxyosd's own
+	// HealthTimeoutSeconds, if set, is how long cmd/janusd's own
 	// Confirm call (and rootfs/init's GiveUpAfter bound alongside it)
 	// waits for this boot to prove healthy before giving up and
 	// reverting - the UpgradeRequest.health_timeout_seconds the caller
@@ -132,7 +132,7 @@ func Clear() error {
 //
 // Callers pass their own healthy/revert - this package stays free of
 // any dependency on what "healthy" or "revert" actually mean for a
-// given caller (cmd/haproxyosd wires healthy to a real HAProxy stats-
+// given caller (cmd/janusd wires healthy to a real HAProxy stats-
 // socket check and revert to internal/bootrevert.To; tests wire both
 // to fakes), keeping this function's own logic - the stability
 // counting and deadline arithmetic - unit-testable without a real

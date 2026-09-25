@@ -1,13 +1,13 @@
 syntax = "proto3";
 
-package haproxyos.v1alpha1;
+package janus.v1alpha1;
 
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+option go_package = "github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1";
 
-// HAProxyService is HAProxyOS's differentiating API surface: it's what
-// haproxyosctl (and any external controller) uses to configure and drive
+// HAProxyService is Janus's differentiating API surface: it's what
+// janusctl (and any external controller) uses to configure and drive
 // HAProxy instead of editing haproxy.cfg over SSH. See internal/haproxy
 // for the implementation (config render/validate/reload, runtime API
 // client over the stats socket).

@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: haproxyos/v1alpha1/network.proto
+// source: janus/v1alpha1/network.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	context "context"
@@ -20,12 +20,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	NetworkService_BGPStatus_FullMethodName            = "/haproxyos.v1alpha1.NetworkService/BGPStatus"
-	NetworkService_BGPApplyConfig_FullMethodName       = "/haproxyos.v1alpha1.NetworkService/BGPApplyConfig"
-	NetworkService_VRRPStatus_FullMethodName           = "/haproxyos.v1alpha1.NetworkService/VRRPStatus"
-	NetworkService_VRRPApplyConfig_FullMethodName      = "/haproxyos.v1alpha1.NetworkService/VRRPApplyConfig"
-	NetworkService_FirewallList_FullMethodName         = "/haproxyos.v1alpha1.NetworkService/FirewallList"
-	NetworkService_FirewallApplyRuleset_FullMethodName = "/haproxyos.v1alpha1.NetworkService/FirewallApplyRuleset"
+	NetworkService_BGPStatus_FullMethodName            = "/janus.v1alpha1.NetworkService/BGPStatus"
+	NetworkService_BGPApplyConfig_FullMethodName       = "/janus.v1alpha1.NetworkService/BGPApplyConfig"
+	NetworkService_VRRPStatus_FullMethodName           = "/janus.v1alpha1.NetworkService/VRRPStatus"
+	NetworkService_VRRPApplyConfig_FullMethodName      = "/janus.v1alpha1.NetworkService/VRRPApplyConfig"
+	NetworkService_FirewallList_FullMethodName         = "/janus.v1alpha1.NetworkService/FirewallList"
+	NetworkService_FirewallApplyRuleset_FullMethodName = "/janus.v1alpha1.NetworkService/FirewallApplyRuleset"
 )
 
 // NetworkServiceClient is the client API for NetworkService service.
@@ -293,7 +293,7 @@ func _NetworkService_FirewallApplyRuleset_Handler(srv interface{}, ctx context.C
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var NetworkService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "haproxyos.v1alpha1.NetworkService",
+	ServiceName: "janus.v1alpha1.NetworkService",
 	HandlerType: (*NetworkServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -322,5 +322,5 @@ var NetworkService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "haproxyos/v1alpha1/network.proto",
+	Metadata: "janus/v1alpha1/network.proto",
 }

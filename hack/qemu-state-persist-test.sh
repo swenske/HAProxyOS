@@ -9,22 +9,22 @@
 # default, 8081 - what a persisted "applied" config below switches to)
 # forwarded on every boot so whichever one is actually live answers:
 #
-#   1. first boot - PKI hasn't been bootstrapped yet, haproxyosd must
+#   1. first boot - PKI hasn't been bootstrapped yet, janusd must
 #      log "pki: first boot - generated a new CA" and write it to
-#      /etc/haproxyos/pki, which mountState mounts from the persistent
-#      partition, not the ephemeral tmpfs. haproxyosd calls
+#      /etc/janus/pki, which mountState mounts from the persistent
+#      partition, not the ephemeral tmpfs. janusd calls
 #      syscall.Sync() right after writing those files (see
-#      cmd/haproxyosd/main.go), so this isn't relying on QEMU's
+#      cmd/janusd/main.go), so this isn't relying on QEMU's
 #      shutdown-time cache flush to make them durable. Bootstrap
 #      default config, so :8080 must answer.
 #   2. second boot, same state.img (now holding boot 1's CA/certs) -
-#      haproxyosd must NOT log that message again: internal/pki.
+#      janusd must NOT log that message again: internal/pki.
 #      LoadOrBootstrap finds an existing ca.crt and loads it instead.
 #      Still bootstrap default config (nothing's applied yet), so :8080
 #      must still answer.
 #   3. between boot 2 and boot 3, this script directly injects a new
 #      haproxy/haproxy.cfg into state.img via `debugfs -w` (no mount, no
-#      loop device, no root needed - deliberately: haproxyos-runner01 is
+#      loop device, no root needed - deliberately: janus-runner01 is
 #      an unprivileged LXC container, where a real `mount -o loop`
 #      failed outright with "failed to setup loop device" the first
 #      time this test ran there, despite working fine locally) - a
@@ -35,7 +35,7 @@
 #      Apply's write target, /etc/haproxy/haproxy.cfg, actually lives on
 #      persistent storage after rootfs/init's mountState bind-mounts it
 #      there - not HAProxyService itself). Third boot must answer on
-#      :8081, and must NOT answer on :8080 - proving haproxyosd started
+#      :8081, and must NOT answer on :8080 - proving janusd started
 #      HAProxy from the persisted config, not the squashfs's read-only
 #      bootstrap default.
 #
@@ -50,7 +50,7 @@ set -euo pipefail
 
 # debugfs (e2fsprogs) installs to /usr/sbin, the same PATH gap already
 # hit and fixed for veritysetup (rootfs/assemble.sh) and mkfs.ext4
-# (rootfs/state-image.sh) on haproxyos-runner01's non-interactive shell
+# (rootfs/state-image.sh) on janus-runner01's non-interactive shell
 # - fixed proactively here too rather than waiting for a third real CI
 # failure to rediscover the identical pattern (this one still had to be
 # found the hard way, since the tool itself - debugfs - was new).
@@ -143,7 +143,7 @@ if ! boot_and_wait_http 8080 "$BOOT2_LOG"; then
   exit 1
 fi
 if grep -q "$FIRST_BOOT_MSG" "$BOOT2_LOG"; then
-  echo "State persist test FAILED: second boot logged '$FIRST_BOOT_MSG' again - the CA didn't persist, /etc/haproxyos/pki is still effectively ephemeral" >&2
+  echo "State persist test FAILED: second boot logged '$FIRST_BOOT_MSG' again - the CA didn't persist, /etc/janus/pki is still effectively ephemeral" >&2
   echo "--- console output ---" >&2
   cat "$BOOT2_LOG" >&2
   exit 1
@@ -157,7 +157,7 @@ echo "Second boot OK: loaded the existing CA from the persistent STATE partition
 APPLIED_CFG="$WORKDIR/applied-haproxy.cfg"
 cat > "$APPLIED_CFG" <<'EOF'
 global
-    stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
+    stats socket /run/janus/haproxy-admin.sock mode 660 level admin
     chroot /var/empty
     uid 1000
     gid 1000
@@ -168,9 +168,9 @@ defaults
     timeout client 30s
     timeout server 30s
 
-frontend haproxyos-health
+frontend janus-health
     bind *:8081
-    http-request return status 200 content-type text/plain string "HAProxyOS: applied config is live\n"
+    http-request return status 200 content-type text/plain string "Janus: applied config is live\n"
 EOF
 # `rm` first: debugfs's `write` refuses to overwrite an existing file.
 # The rm's own "file not found"-style output (there's always something

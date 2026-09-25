@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package haproxyos.v1alpha1;
+package janus.v1alpha1;
 
 import "google/protobuf/empty.proto";
-import "haproxyos/v1alpha1/common.proto";
+import "janus/v1alpha1/common.proto";
 
-option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+option go_package = "github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1";
 
 // SystemService is the reduced, non-Kubernetes equivalent of Talos's
 // MachineService: machine lifecycle, declarative configuration,
@@ -24,7 +24,7 @@ service SystemService {
   // Reboot power-cycles the whole machine.
   rpc Reboot(RebootRequest) returns (RebootResponse);
   rpc Shutdown(google.protobuf.Empty) returns (ShutdownResponse);
-  // Restart restarts the haproxyosd control-plane process in place,
+  // Restart restarts the janusd control-plane process in place,
   // without rebooting the machine or interrupting HAProxy itself.
   rpc Restart(google.protobuf.Empty) returns (RestartResponse);
   // Reset wipes the requested partitions (state/ephemeral) and reboots -
@@ -154,7 +154,7 @@ message DmesgRequest {
 
 message LogsRequest {
   // A managed service id (see ServiceInfo.id): "haproxy", "bird",
-  // "keepalived", "haproxyosd".
+  // "keepalived", "janusd".
   string id = 1;
   bool follow = 2;
   int32 tail_lines = 3;

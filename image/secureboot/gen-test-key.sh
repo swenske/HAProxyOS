@@ -23,7 +23,7 @@ mkdir -p "$OUT_DIR"
 openssl req -x509 -newkey rsa:2048 \
   -keyout "$OUT_DIR/key.pem" -out "$OUT_DIR/cert.pem" \
   -nodes -days 3650 \
-  -subj "/CN=HAProxyOS test signing key (not for production use)" \
+  -subj "/CN=Janus test signing key (not for production use)" \
   >/dev/null 2>&1
 
 echo "Wrote $OUT_DIR/{key.pem,cert.pem} (throwaway test key - see this script's own comment)"

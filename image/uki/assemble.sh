@@ -53,7 +53,7 @@ trap 'rm -f "$CMDLINE_FILE"' EXIT
   # proved a clean, zero-denial boot under enforcing mode (see
   # hack/qemu-selinux-test.sh) - this is what actually makes that the
   # shipped default rather than just a fact proven about a test boot.
-  # kernel/configs/haproxyos_defconfig's own SECURITY_SELINUX_DEVELOP=y
+  # kernel/configs/janus_defconfig's own SECURITY_SELINUX_DEVELOP=y
   # deliberately stays on regardless (so /sys/fs/selinux/enforce can
   # still be toggled interactively for debugging, and the kernel's own
   # default without this cmdline override would still be the safer
@@ -69,7 +69,7 @@ UKIFY_ARGS=(
   build
   --linux="$KERNEL"
   --cmdline="@$CMDLINE_FILE"
-  --os-release="$(printf 'NAME=HAProxyOS\nPRETTY_NAME=HAProxyOS\nID=haproxyos\n')"
+  --os-release="$(printf 'NAME=Janus\nPRETTY_NAME=Janus\nID=janus\n')"
   -o "$OUT"
 )
 if [ -n "$SIGNING_KEY" ] && [ -n "$SIGNING_CERT" ]; then

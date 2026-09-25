@@ -20,7 +20,7 @@
 # A third boot, back on slot A, then proves rootfs/init/main.go's
 # resolveStateDevice (cmdline.go) correctly finds STATE (partition 6)
 # on *this* real single-disk layout, not just the older separate-drive
-# one hack/qemu-state-persist-test.sh already covers: haproxyosd's
+# one hack/qemu-state-persist-test.sh already covers: janusd's
 # "first boot" log line must NOT reappear, since boot 1 already
 # bootstrapped a CA onto partition 6 - internal/pki.LoadOrBootstrap
 # should find and load it instead. The disk isn't attached read-only

@@ -6,7 +6,7 @@
 # not a build artifact to extract). The frontend SPA (dashboard/frontend)
 # is *not* built here - its output is already committed to dashboard/
 # backend/static (see that tree's own README for why, the same reasoning
-# gen/haproxyos/v1alpha1 is committed), so a plain `go build` here embeds
+# gen/janus/v1alpha1 is committed), so a plain `go build` here embeds
 # exactly what a real deploy expects without needing a Node.js toolchain
 # in this image's own build stage.
 #

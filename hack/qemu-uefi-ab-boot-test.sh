@@ -11,7 +11,7 @@
 #   1. boot disk.img as built by image/disk/assemble.sh (active slot A)
 #      - OVMF must discover and boot the ESP's UKI on its own, dm-verity
 #      must verify slot A, HAProxy must answer real HTTP, and
-#      haproxyosd must log "first boot" (a fresh CA bootstrapped onto
+#      janusd must log "first boot" (a fresh CA bootstrapped onto
 #      STATE, partition 6).
 #   2. image/disk/activate-slot.sh switches the SAME disk's ESP to slot
 #      B, in place - BOOT-A-DATA/HASH, BOOT-B-DATA/HASH and STATE are
@@ -19,7 +19,7 @@
 #   3. boot the same disk.img again - OVMF's own log must now show it
 #      chain-loaded a table referencing /dev/vda4 (BOOT-B-DATA), not
 #      /dev/vda2, proving the ESP swap actually took effect; HAProxy
-#      must again answer HTTP; and haproxyosd must NOT log "first boot"
+#      must again answer HTTP; and janusd must NOT log "first boot"
 #      again - internal/pki.LoadOrBootstrap finding and loading the
 #      *same* CA boot 1 wrote, proving STATE survived the slot switch
 #      untouched, not just that slot B's squashfs/verity happens to
@@ -36,7 +36,7 @@ KERNEL="${2:?usage: $0 <disk.img> <bzImage> <rootfs-dir>}"
 ROOTFS_DIR="${3:?usage: $0 <disk.img> <bzImage> <rootfs-dir>}"
 HTTP_TIMEOUT_SECS="${QEMU_UEFI_AB_HTTP_TIMEOUT:-40}"
 HOST_PORT="${QEMU_UEFI_AB_TEST_PORT:-18089}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"

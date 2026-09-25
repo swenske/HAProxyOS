@@ -25,7 +25,7 @@ set -euo pipefail
 KERNEL="${1:?usage: $0 <bzImage> <rootfs-dir>}"
 ROOTFS_DIR="${2:?usage: $0 <bzImage> <rootfs-dir>}"
 BOOT_TIMEOUT_SECS="${QEMU_SECUREBOOT_TIMEOUT:-30}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 
 OVMF_CODE="${OVMF_CODE_SECBOOT:-/usr/share/OVMF/OVMF_CODE_4M.secboot.fd}"
 OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS_4M.fd}"

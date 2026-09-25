@@ -7,7 +7,7 @@
 #      active, bootstrap config on :8080) under real OVMF - HTTP 200
 #      confirms it's up, PKI bootstraps onto STATE.
 #   2. build a second, genuinely different rootfs (same init/
-#      haproxyosd/haproxy binaries, a haproxy.cfg bound to :8081
+#      janusd/haproxy binaries, a haproxy.cfg bound to :8081
 #      instead of :8080 - different content, different squashfs, a
 #      different root hash) and a release bundle for it (image/
 #      release/assemble.sh - rootfs.squashfs/rootfs.verity/uki-a.efi/
@@ -15,18 +15,18 @@
 #   3. inject the v2 bundle's 4 files into disk.img's STATE partition
 #      *before ever booting it* (under a new "upgrade/" directory,
 #      via debugfs -w), then extract ca.crt/admin.crt/admin.key back
-#      out the same way, after boot A (haproxyosd does print all three
+#      out the same way, after boot A (janusd does print all three
 #      to the console on first boot, but a script can't watch a live
 #      console the way a human doing this for real would). Both have
 #      to happen through debugfs directly on the image file, never
-#      through a live mount from the host: haproxyosctl (host) and haproxyosd
+#      through a live mount from the host: janusctl (host) and janusd
 #      (guest) don't share a filesystem across the QEMU host/guest
 #      boundary, unlike CLAUDE.md's normal "share a filesystem" case -
 #      and writing to STATE from the host while the guest *also* has
 #      it mounted read-write would just corrupt it (this is exactly why
 #      the injection happens before the first boot, not concurrently
 #      with a running one).
-#   4. call `haproxyosctl lifecycle upgrade` over real mTLS, pointing
+#   4. call `janusctl lifecycle upgrade` over real mTLS, pointing
 #      at the bundle's path *as the guest itself sees it*
 #      (/etc/.state/upgrade, since rootfs/init/main.go's mountState
 #      mounts all of STATE there) - Upgrade must write the v2
@@ -44,7 +44,7 @@
 #      own staging: call Rollback afterward and confirm the guest comes
 #      back up healthy again, with the kernel cmdline now showing slot
 #      A's partitions (/dev/vda2 /dev/vda3) and v1's root hash again -
-#      proving slot A's pre-existing \HAPROXYOS\UKI-A.EFI is still
+#      proving slot A's pre-existing \JANUS\UKI-A.EFI is still
 #      intact and correct.
 #
 # Real bug found empirically while writing this test (not a production
@@ -68,10 +68,10 @@
 # answers, since the served config is deliberately state-persisted and
 # identical across both slots once slot A has booted once.
 #
-# Usage: hack/qemu-lifecycle-upgrade-test.sh <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>
+# Usage: hack/qemu-lifecycle-upgrade-test.sh <disk.img> <bzImage> <build-dir> <janusctl-bin>
 # <disk.img> is image/disk/assemble.sh's output for the *original* (v1,
 # :8080) image, mutated in place by this test. <build-dir> is the
-# Makefile's own $(BUILD_DIR) - must contain init/haproxyosd/haproxy
+# Makefile's own $(BUILD_DIR) - must contain init/janusd/haproxy
 # (rootfs/assemble.sh's own inputs, reused here to build a v2 rootfs)
 # and rootfs/{rootfs.squashfs,rootfs.verity,rootfs.roothash,
 # rootfs.verity.info} (rootfs/assemble.sh's output for v1).
@@ -79,16 +79,16 @@ set -euo pipefail
 
 export PATH="$PATH:/usr/sbin:/sbin"
 
-DISK="${1:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-KERNEL="${2:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-BUILD_DIR="${3:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-CTL="${4:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
+DISK="${1:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+KERNEL="${2:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+BUILD_DIR="${3:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+CTL="${4:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
 HTTP_TIMEOUT_SECS="${QEMU_UPGRADE_HTTP_TIMEOUT:-40}"
 REBOOT_TIMEOUT_SECS="${QEMU_UPGRADE_REBOOT_TIMEOUT:-60}"
 HOST_PORT_8080="${QEMU_UPGRADE_TEST_PORT:-18092}"
 HOST_PORT_8081="${QEMU_UPGRADE_TEST_PORT2:-18093}"
 HOST_GRPC_PORT="${QEMU_UPGRADE_GRPC_PORT:-18094}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
@@ -108,7 +108,7 @@ trap cleanup EXIT
 # --- build a genuinely different v2 rootfs + release bundle ---
 cat > "$WORKDIR/haproxy-v2.cfg" <<'EOF'
 global
-    stats socket /run/haproxyos/haproxy-admin.sock mode 660 level admin
+    stats socket /run/janus/haproxy-admin.sock mode 660 level admin
     chroot /var/empty
     uid 1000
     gid 1000
@@ -119,15 +119,15 @@ defaults
     timeout client 30s
     timeout server 30s
 
-frontend haproxyos-health
+frontend janus-health
     bind *:8081
-    http-request return status 200 content-type text/plain string "HAProxyOS: v2 is up\n"
+    http-request return status 200 content-type text/plain string "Janus: v2 is up\n"
 EOF
 
 V2_ROOTFS="$WORKDIR/rootfs-v2"
 mkdir -p "$V2_ROOTFS"
-"$SELF_DIR/../rootfs/assemble.sh" "$V2_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/haproxyosd" \
-  "$BUILD_DIR/haproxy" "$WORKDIR/haproxy-v2.cfg" "$BUILD_DIR/selinux/hapos.policy"
+"$SELF_DIR/../rootfs/assemble.sh" "$V2_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/janusd" \
+  "$BUILD_DIR/haproxy" "$WORKDIR/haproxy-v2.cfg" "$BUILD_DIR/selinux/janus.policy"
 
 V2_BUNDLE="$WORKDIR/bundle-v2"
 "$SELF_DIR/../image/release/assemble.sh" "$V2_BUNDLE" "$KERNEL" "$V2_ROOTFS"
@@ -254,15 +254,15 @@ for f in ca.crt admin.crt admin.key; do
 done
 
 # --- call Upgrade for real, over mTLS, referencing the bundle's
-# *guest-side* path - haproxyosctl's own -sha256 auto-detection reads
+# *guest-side* path - janusctl's own -sha256 auto-detection reads
 # from the argument it's given, which would be the guest path here (not
-# readable from the host running haproxyosctl), so the sha256 is passed
+# readable from the host running janusctl), so the sha256 is passed
 # explicitly instead, computed from the real, host-local bundle. ---
 V2_SHA256="$(cat "$V2_BUNDLE/rootfs.squashfs.sha256")"
 UPGRADE_OUT="$("$CTL" -endpoint "127.0.0.1:${HOST_GRPC_PORT}" -ca "$WORKDIR/ca.crt" -cert "$WORKDIR/admin.crt" -key "$WORKDIR/admin.key" lifecycle upgrade -sha256 "$V2_SHA256" "$GUEST_BUNDLE_PATH")"
 echo "$UPGRADE_OUT"
 if ! echo "$UPGRADE_OUT" | grep -qi "rebooting"; then
-  echo "Upgrade test FAILED: haproxyosctl lifecycle upgrade never reached the 'rebooting' stage" >&2
+  echo "Upgrade test FAILED: janusctl lifecycle upgrade never reached the 'rebooting' stage" >&2
   exit 1
 fi
 

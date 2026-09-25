@@ -4,7 +4,7 @@
 # guest's HAProxy health frontend (see rootfs/base/etc/haproxy/
 # haproxy.cfg), then polls it over real TCP/IP until it answers or a
 # timeout is hit. This is the Phase 2 network-integration boot test: it
-# proves haproxyosd -> haproxy actually run and serve traffic *inside*
+# proves janusd -> haproxy actually run and serve traffic *inside*
 # the QEMU-booted kernel, not just on the build host (see hack/
 # qemu-run.sh and the "HAProxy integration test" step in image-build.yml
 # for that host-level check).

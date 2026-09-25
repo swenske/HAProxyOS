@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package haproxyos.v1alpha1;
+package janus.v1alpha1;
 
-option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+option go_package = "github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1";
 
 // Data is a chunk of a byte stream, reused by every RPC that streams
 // unstructured output (Logs, Dmesg, PacketCapture, Copy, Read) instead of

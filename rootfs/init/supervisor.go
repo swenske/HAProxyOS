@@ -10,8 +10,8 @@ import (
 
 // Supervisor restarts one child process forever, with a growing backoff
 // between restarts that resets after the process has stayed up long
-// enough to be considered recovered. This is the "init -> haproxyosd"
-// half of PID 1's job (see rootfs/init/README.md) - haproxyosd, in turn,
+// enough to be considered recovered. This is the "init -> janusd"
+// half of PID 1's job (see rootfs/init/README.md) - janusd, in turn,
 // supervises haproxy the same way it always has (internal/haproxy.Manager).
 type Supervisor struct {
 	Path string
@@ -42,8 +42,8 @@ type Supervisor struct {
 	// give-up threshold, ever" this package otherwise holds to (see the
 	// package doc comment): used only by rootfs/init's boot-commit
 	// handling, to force a revert to the previous A/B slot when the
-	// current one's haproxyosd can't even stay running long enough to
-	// run its own HAProxy-level health check (cmd/haproxyosd/main.go,
+	// current one's janusd can't even stay running long enough to
+	// run its own HAProxy-level health check (cmd/janusd/main.go,
 	// internal/bootcommit.Confirm) rather than restarting a doomed
 	// instance forever - a real, different action from "giving up" on
 	// reaching the node at all, since the reverted slot is a

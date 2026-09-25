@@ -1,4 +1,4 @@
-# Continuous integration: lint, test, and build the HAProxyOS control
+# Continuous integration: lint, test, and build the Janus control
 # plane (cmd/, internal/, gen/) on every push to main and every pull
 # request (including from forks). Always runs on GitHub-hosted runners -
 # free/unlimited on a public repo, and this is the one workflow that MUST
@@ -33,7 +33,7 @@ jobs:
         with:
           version: latest
 
-      # gen/haproxyos/v1alpha1 (generated from api/proto/**.proto via
+      # gen/janus/v1alpha1 (generated from api/proto/**.proto via
       # `make proto`) must stay committed and in sync - this job's own `go
       # build`/`go test` never regenerates it. Catch anyone who edited a
       # .proto without regenerating/committing the Go output.

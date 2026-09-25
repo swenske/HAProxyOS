@@ -1,6 +1,6 @@
-# HAProxyOS kernel config. Boots under QEMU (virtio-net + DHCP-assigned
+# Janus kernel config. Boots under QEMU (virtio-net + DHCP-assigned
 # IP via kernel-builtin IP_PNP, no userspace network tooling needed) with
-# a static Go init as PID 1, which supervises haproxyosd -> a real static
+# a static Go init as PID 1, which supervises janusd -> a real static
 # HAProxy binary reachable over the network. Also has squashfs +
 # dm-verity support (Phase 3: rootfs/assemble.sh builds a verity-protected
 # squashfs rootfs image, now the real boot root= via dm-mod.create=),
@@ -50,7 +50,7 @@
 #   # function (-2)").
 #   CONFIG_CRYPTO_SHA256=y
 #
-#   # persistent STATE partition (Phase 3 cont'd: /etc/haproxyos/pki
+#   # persistent STATE partition (Phase 3 cont'd: /etc/janus/pki
 #   # needs to survive a reboot, unlike rootfs/init's tmpfs-backed
 #   # ephemeral overlay) - a third virtio-blk drive, pre-formatted at
 #   # build time (no mkfs on the target, matching the "no package
@@ -101,7 +101,7 @@
 #   # CONFIG_SECURITY is the master gate every LSM (SELinux, Yama, ...)
 #   # needs - unset until now, so nothing gated behind it (not just Yama)
 #   # could ever have been enabled at all, even by accident. Only Yama
-#   # (ptrace_scope restriction - relevant here since haproxyosd runs as
+#   # (ptrace_scope restriction - relevant here since janusd runs as
 #   # root and a compromised instance could otherwise ptrace anything)
 #   # is turned on; verified via a real `diff` of the fully-resolved
 #   # config, not just a clean merge, that enabling the master gate
@@ -129,7 +129,7 @@
 #   # Phase 4 cont'd: SELinux kernel enablement (no policy compiled or
 #   # loaded yet - this slice is deliberately just "the kernel can do
 #   # SELinux", proven by a real boot showing the LSM initialize, not
-#   # "HAProxyOS enforces a policy" - see docs/architecture.md for the
+#   # "Janus enforces a policy" - see docs/architecture.md for the
 #   # actual policy/loading work still open). CONFIG_SECURITY_SELINUX
 #   # itself `depends on SECURITY_NETWORK && AUDIT && NET && INET` in
 #   # this kernel version - AUDIT wasn't just missing, it was explicitly

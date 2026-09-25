@@ -2,14 +2,14 @@
 # Proves Phase 4's runtime kernel hardening (rootfs/init/main.go's
 # hardenSysctls) actually applies every sysctl it claims to, on a real
 # boot - not just that the Go code doesn't panic, and not just that the
-# matching kernel/configs/haproxyos_defconfig options compile in (a
+# matching kernel/configs/janus_defconfig options compile in (a
 # real gap this test's own first draft caught: CONFIG_SYN_COOKIES
 # wasn't set, so /proc/sys/net/ipv4/tcp_syncookies didn't exist at all
 # and that one write silently logged "no such file or directory" while
 # every other sysctl succeeded - the boot itself, and even the network
 # test, looked completely fine either way, since a non-fatal write
 # failure doesn't block anything). Same boot pattern hack/
-# qemu-network-test.sh uses (haproxyosd -> haproxy inside the VM,
+# qemu-network-test.sh uses (janusd -> haproxy inside the VM,
 # real HTTP over virtio-net), plus a check of every "init: sysctl ..."
 # console line hardenSysctls prints - each one is logged as it's
 # written, success or failure, specifically so an external test like

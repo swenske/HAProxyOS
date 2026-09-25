@@ -1,11 +1,11 @@
-// Command init is HAProxyOS's PID 1. It mounts proc/sysfs/devtmpfs,
+// Command init is Janus's PID 1. It mounts proc/sysfs/devtmpfs,
 // sets up an ephemeral tmpfs writable layer (see mountEphemeral) and the
 // persistent STATE partition (see mountState), prints a fixed success
 // marker that hack/qemu-run.sh greps for, then:
-//   - if /sbin/haproxyosd is present in the initramfs, starts it under a
+//   - if /sbin/janusd is present in the initramfs, starts it under a
 //     Supervisor (see supervisor.go) that restarts it - with a growing,
 //     capped backoff - every time it exits, forever, on an ordinary
-//     boot. There's no give-up threshold: haproxyosd is the only way to
+//     boot. There's no give-up threshold: janusd is the only way to
 //     reach the node at all (see docs/architecture.md's "no shell"
 //     design), so a node that stops retrying after N crashes would be
 //     permanently unmanageable with no fallback - unlike systemd's
@@ -19,7 +19,7 @@
 //     "giving up" on reaching the node at all.
 //   - otherwise, powers off cleanly after a short delay - the Phase 1
 //     boot-proof shape, so `make qemu-boot-test` (init alone, no
-//     haproxyosd packaged in) keeps working unchanged.
+//     janusd packaged in) keeps working unchanged.
 package main
 
 import (
@@ -30,12 +30,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/swenske/HAProxyOS/internal/bootcommit"
-	"github.com/swenske/HAProxyOS/internal/bootrevert"
-	"github.com/swenske/HAProxyOS/internal/bootslot"
+	"github.com/swenske/Janus/internal/bootcommit"
+	"github.com/swenske/Janus/internal/bootrevert"
+	"github.com/swenske/Janus/internal/bootslot"
 )
 
-const daemonPath = "/sbin/haproxyosd"
+const daemonPath = "/sbin/janusd"
 
 func mount(source, target, fstype string) {
 	mountData(source, target, fstype, "")
@@ -58,16 +58,16 @@ func mountData(source, target, fstype, data string) {
 // verified) root a writable layer, entirely tmpfs-backed - nothing here
 // survives a reboot (see mountState for the one directory that does).
 // /run and /tmp are mounted empty - nothing pre-existing there needs to
-// survive the overmount (haproxyosd's /run/haproxyos, HAProxy's stats
+// survive the overmount (janusd's /run/janus, HAProxy's stats
 // socket/pid file, Manager.Validate's tmpfile). /etc needs its own
 // handling since it isn't empty on a freshly-booted node: rootfs/base/
 // etc/haproxy/haproxy.cfg (the bootstrap default config) lives on the
 // squashfs and would otherwise vanish under a plain tmpfs mount, so its
 // bytes are read *before* the overmount and rewritten into the new
-// tmpfs - this is what makes both PKI bootstrap (/etc/haproxyos/pki,
+// tmpfs - this is what makes both PKI bootstrap (/etc/janus/pki,
 // see mountState) and a live ApplyConfig RPC (which writes to this same
 // path) actually work on a dm-verity-booted node; before this,
-// haproxyosd crash-looped forever on "read-only file system" trying to
+// janusd crash-looped forever on "read-only file system" trying to
 // create either. /var is left alone (still squashfs-backed): the only
 // thing under it is /var/empty, HAProxy's chroot jail, which must keep
 // the exact immutable mode-0000 baked into the image by rootfs/
@@ -100,7 +100,7 @@ func mountEphemeral() {
 
 // mountState mounts the pre-formatted, persistent STATE partition (see
 // rootfs/state-image.sh) once at /mnt/state, then bind-mounts its pki/
-// and haproxy/ subdirectories over /etc/haproxyos/pki and /etc/haproxy
+// and haproxy/ subdirectories over /etc/janus/pki and /etc/haproxy
 // respectively - the two things mountEphemeral's tmpfs overlay can't be
 // allowed to wipe every boot: PKI (or a fresh CA/admin cert generates
 // every boot) and applied config (or a live ApplyConfig RPC - which
@@ -166,14 +166,14 @@ func mountState() {
 
 	// pki/: created with 0700 directly (matching
 	// internal/pki.LoadOrBootstrap's own intent) rather than mounting
-	// the STATE device straight at /etc/haproxyos/pki and chmod-ing
+	// the STATE device straight at /etc/janus/pki and chmod-ing
 	// afterward - a bind mount's target shows the *source* directory's
 	// mode, so controlling it here is enough, no separate chmod needed.
 	pkiDir := filepath.Join(stateRoot, "pki")
 	if err := os.MkdirAll(pkiDir, 0o700); err != nil {
 		fmt.Printf("init: mkdir %s: %v\n", pkiDir, err)
 	} else {
-		bindMount(pkiDir, "/etc/haproxyos/pki")
+		bindMount(pkiDir, "/etc/janus/pki")
 	}
 
 	// haproxy/: needs the same first-boot seeding problem mountEphemeral
@@ -264,7 +264,7 @@ func bindMount(src, dst string) {
 
 // hardenSysctls applies the runtime half of Phase 4's kernel hardening
 // pass - the half that can't be baked into kernel/configs/
-// haproxyos_defconfig at build time (a tunable *value*, not a feature
+// janus_defconfig at build time (a tunable *value*, not a feature
 // being compiled in or out at all) and has to be written to /proc/sys
 // at boot instead, since there's no sysctl(8)/procps binary, and no
 // /etc/sysctl.d for one to read anyway, on this rootfs. Runs right
@@ -283,14 +283,14 @@ func hardenSysctls() {
 	sysctls := map[string]string{
 		// Kernel self-protection: hide the ring buffer and kernel
 		// pointers from anything without CAP_SYSLOG/CAP_SYSLOG-adjacent
-		// privilege - defense in depth against a compromised haproxyosd
+		// privilege - defense in depth against a compromised janusd
 		// or haproxy (uid 1000, no such capability) trying to defeat
 		// KASLR via an info leak.
 		"/proc/sys/kernel/dmesg_restrict": "1",
 		"/proc/sys/kernel/kptr_restrict":  "2",
-		// Yama (kernel/configs/haproxyos_defconfig's own CONFIG_SECURITY_YAMA):
+		// Yama (kernel/configs/janus_defconfig's own CONFIG_SECURITY_YAMA):
 		// 2 ("admin-only") means only a process with CAP_SYS_PTRACE can
-		// ptrace another - haproxyosd (root) still can, but the
+		// ptrace another - janusd (root) still can, but the
 		// unprivileged haproxy worker (chroot + uid 1000, no such
 		// capability) can no longer ptrace anything at all, including
 		// itself/siblings.
@@ -346,7 +346,7 @@ func hardenSysctls() {
 // policy selinux/classes.conf + selinux/policy.conf compile into (see
 // the Makefile's selinux-policy target) - a fixed path on the
 // squashfs-backed rootfs, not something init discovers dynamically.
-const selinuxPolicyPath = "/etc/selinux/hapos.policy"
+const selinuxPolicyPath = "/etc/selinux/janus.policy"
 
 // loadSELinuxPolicy mounts selinuxfs and writes the compiled binary
 // policy straight to /sys/fs/selinux/load - the entire "loading" story
@@ -361,7 +361,7 @@ const selinuxPolicyPath = "/etc/selinux/hapos.policy"
 // squashfs at all, so there's no policy file to find) is non-fatal, the
 // same tolerant pattern mount() and mountState() already use for a
 // missing STATE drive: log and move on. The kernel stays functionally
-// as if SELinux were absent (kernel/configs/haproxyos_defconfig's own
+// as if SELinux were absent (kernel/configs/janus_defconfig's own
 // SECURITY_SELINUX_DEVELOP=y keeps it permissive with no policy loaded
 // regardless), so those tests' own boots are unaffected either way.
 //
@@ -403,7 +403,7 @@ func main() {
 		release = []byte("unknown")
 	}
 
-	fmt.Println("HAProxyOS init")
+	fmt.Println("Janus init")
 	fmt.Printf("kernel: %s", release) // osrelease already ends in \n
 
 	if _, err := os.Stat(daemonPath); err == nil {
@@ -411,14 +411,14 @@ func main() {
 		return
 	}
 
-	fmt.Println("HAPROXYOS_INIT_BOOT_OK")
+	fmt.Println("JANUS_INIT_BOOT_OK")
 	// Give the console a moment to flush before the machine goes away.
 	time.Sleep(2 * time.Second)
 	powerOff()
 }
 
 // defaultGiveUpAfter is how long Supervisor keeps restarting a
-// crash-looping haproxyosd, on a boot with a pending boot-commit marker
+// crash-looping janusd, on a boot with a pending boot-commit marker
 // (see checkBootCommit), before giving up on this slot ever coming up
 // at all and reverting - overridden per-boot by the marker's own
 // HealthTimeoutSeconds (UpgradeRequest.health_timeout_seconds) when
@@ -428,11 +428,11 @@ func main() {
 const defaultGiveUpAfter = 60 * time.Second
 
 func startDaemon(pendingMarker *bootcommit.Marker) {
-	if err := os.MkdirAll("/run/haproxyos", 0o755); err != nil {
-		fmt.Printf("init: mkdir /run/haproxyos: %v\n", err)
+	if err := os.MkdirAll("/run/janus", 0o755); err != nil {
+		fmt.Printf("init: mkdir /run/janus: %v\n", err)
 	}
 
-	fmt.Println("HAPROXYOS_INIT_BOOT_OK")
+	fmt.Println("JANUS_INIT_BOOT_OK")
 
 	sv := &Supervisor{
 		Path:       daemonPath,
@@ -443,19 +443,19 @@ func startDaemon(pendingMarker *bootcommit.Marker) {
 		MaxBackoff: 30 * time.Second,
 		// StableAfter only matters for Supervisor's own crash-backoff
 		// reset here - real health confirmation for a pending marker
-		// happens inside haproxyosd itself now (cmd/haproxyosd/main.go,
+		// happens inside janusd itself now (cmd/janusd/main.go,
 		// against HAProxy's actual stats socket via
 		// internal/bootcommit.Confirm), not by inference from how long
-		// the haproxyosd *process* merely stayed alive.
+		// the janusd *process* merely stayed alive.
 		StableAfter: 60 * time.Second,
 	}
 
 	// A pending marker means this boot is provisional (see
 	// checkBootCommit) - bound how long Supervisor keeps restarting a
-	// haproxyosd that's crash-looping so fast, or so often, that it
+	// janusd that's crash-looping so fast, or so often, that it
 	// never gets a real chance to run its own HAProxy-level health
-	// check at all - the one thing haproxyosd's own confirmation logic
-	// can't catch, since it requires haproxyosd to actually be running.
+	// check at all - the one thing janusd's own confirmation logic
+	// can't catch, since it requires janusd to actually be running.
 	// Without this, such a slot would sit unreachable forever:
 	// checkBootCommit's own cross-boot TriesLeft check only ever gets a
 	// chance to act on a boot *after* this one, which requires the
@@ -473,9 +473,9 @@ func startDaemon(pendingMarker *bootcommit.Marker) {
 }
 
 // giveUpBootCommit is Supervisor's OnGiveUp hook, wired up only when
-// this boot has a pending marker: haproxyosd has been restarted for
+// this boot has a pending marker: janusd has been restarted for
 // GiveUpAfter without staying up at all, so it never even got a chance
-// to run its own HAProxy-level health check (see cmd/haproxyosd/
+// to run its own HAProxy-level health check (see cmd/janusd/
 // main.go). Re-reads the marker rather than trusting the one it closed
 // over, since it could have been cleared by something else in the
 // meantime - in which case this is a deliberate no-op.
@@ -484,7 +484,7 @@ func giveUpBootCommit(marker *bootcommit.Marker) {
 	if err != nil || cur == nil || cur.Slot != marker.Slot {
 		return
 	}
-	fmt.Printf("init: haproxyosd never stayed up for slot %s - giving up and reverting to slot %s\n", cur.Slot, cur.RevertTo)
+	fmt.Printf("init: janusd never stayed up for slot %s - giving up and reverting to slot %s\n", cur.Slot, cur.RevertTo)
 	revertAndReboot(cur)
 }
 
@@ -507,7 +507,7 @@ func giveUpBootCommit(marker *bootcommit.Marker) {
 //   - a marker for this slot with no tries left: a previous boot into
 //     this same slot already used its one attempt without ever
 //     confirming - whatever's wrong with it isn't fixing itself, so
-//     there's no point starting haproxyosd for a third time. Reverts
+//     there's no point starting janusd for a third time. Reverts
 //     the ESP back to RevertTo (espswitch.Activate - the exact
 //     mechanism LifecycleService.Rollback uses, just triggered by init
 //     instead of a gRPC call), clears the marker, and reboots
@@ -564,12 +564,12 @@ func checkBootCommit() *bootcommit.Marker {
 
 // revertAndReboot switches the ESP back to marker.RevertTo and clears
 // the marker (internal/bootrevert.To - the same helper
-// cmd/haproxyosd's own HAProxy-level revert path uses), then reboots -
+// cmd/janusd's own HAProxy-level revert path uses), then reboots -
 // the success path never returns, since PID 1 must not fall through to
-// starting haproxyosd on a slot that just proved itself unhealthy.
+// starting janusd on a slot that just proved itself unhealthy.
 // Called from two places: checkBootCommit (a *later* boot finding
 // tries already exhausted) and giveUpBootCommit (this *same* boot,
-// once Supervisor's GiveUpAfter elapses without haproxyosd ever staying
+// once Supervisor's GiveUpAfter elapses without janusd ever staying
 // up) - the two paths that can conclude a slot isn't coming up at all,
 // one crossing a reboot to find out and one not needing to.
 func revertAndReboot(marker *bootcommit.Marker) {

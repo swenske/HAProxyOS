@@ -1,19 +1,19 @@
-# HAProxyOS — gRPC API catalog
+# Janus — gRPC API catalog
 
-Full contract lives in `api/proto/haproxyos/v1alpha1/*.proto` (generated
-Go code in `gen/haproxyos/v1alpha1`, implementations in `internal/api`).
+Full contract lives in `api/proto/janus/v1alpha1/*.proto` (generated
+Go code in `gen/janus/v1alpha1`, implementations in `internal/api`).
 This is the human-readable index, adapted from Talos's own
 `MachineService`/`LifecycleService` (verified directly against
 `siderolabs/talos`'s `.proto` files on GitHub - `api/machine/machine.proto`,
 `storage.proto`, `lifecycle.proto`) with everything Kubernetes/etcd-
 specific dropped, and `HAProxyService`/`NetworkService` added as
-HAProxyOS's own differentiating surface.
+Janus's own differentiating surface.
 
 Status column: ✅ implemented · ⬜ contract defined, returns
 `codes.Unimplemented` (see `internal/api`).
 
 **mTLS is mandatory on every connection** (`internal/pki`, wired up in
-`cmd/haproxyosd`) - there is no plaintext or unauthenticated mode. A
+`cmd/janusd`) - there is no plaintext or unauthenticated mode. A
 node generates its own CA + server certificate + an initial admin client
 certificate on first boot; `GenerateClientConfiguration` issues
 additional client certificates once you already have one.
@@ -35,7 +35,7 @@ are also technically non-mutating).
 | `Hostname` | | ⬜ | |
 | `Reboot` | | ⬜ | Power-cycle the machine |
 | `Shutdown` | | ⬜ | |
-| `Restart` | | ⬜ | Restart `haproxyosd` in place (not the machine) |
+| `Restart` | | ⬜ | Restart `janusd` in place (not the machine) |
 | `Reset` | | ⬜ | Wipe STATE/EPHEMERAL and reboot |
 | `ApplyConfiguration` | server | ⬜ | Apply declarative config (`internal/config`), auto/no-reboot/reboot/try modes |
 | `Events` | server | ⬜ | Internal event log |
@@ -52,7 +52,7 @@ are also technically non-mutating).
 | `Netstat` | | ⬜ | |
 | `Mounts` | | ⬜ | |
 | `Processes` | | ⬜ | |
-| `ServiceList` | | ⬜ | Managed services: `haproxy`, `bird`, `keepalived`, `haproxyosd` |
+| `ServiceList` | | ⬜ | Managed services: `haproxy`, `bird`, `keepalived`, `janusd` |
 | `ServiceStart` / `Stop` / `Restart` | | ⬜ | |
 | `List` | server | ⬜ | Scoped, read-only file listing - no shell |
 | `Read` | server | ⬜ | Scoped, read-only file content |
@@ -66,7 +66,7 @@ are also technically non-mutating).
 | Method | Streaming | Status | Purpose |
 |---|---|---|---|
 | `Install` | server | ✅ | Partition a blank target disk from scratch (GPT + ESP/FAT32 + STATE/ext4, pure Go via go-diskfs) and write a release bundle's rootfs identically to both A/B slots - doesn't reboot anything |
-| `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health` auto-reverts if the new slot's HAProxy (real stats-socket check) never comes up healthy in time, or if haproxyosd itself never stays running long enough to check |
+| `Upgrade` | server | ✅ | Write a release bundle's rootfs to the inactive A/B slot, switch + reboot - `wait_for_health` auto-reverts if the new slot's HAProxy (real stats-socket check) never comes up healthy in time, or if janusd itself never stays running long enough to check |
 | `Rollback` | | ✅ | Switch back to the other A/B slot, reboot |
 
 ## HAProxyService
@@ -95,7 +95,7 @@ are also technically non-mutating).
 
 ## Deliberately not present
 
-- `EtcdService` - HAProxyOS nodes don't form an etcd cluster.
+- `EtcdService` - Janus nodes don't form an etcd cluster.
 - `ImageService`/container runtime RPCs - no container runtime on the
   target OS; HAProxy and the optional daemons are native processes
   supervised by the custom PID 1 (`rootfs/init`, Phase 1).

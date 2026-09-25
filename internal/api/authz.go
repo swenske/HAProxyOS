@@ -1,11 +1,11 @@
-// Role enforcement: mTLS (internal/pki, wired up in cmd/haproxyosd)
+// Role enforcement: mTLS (internal/pki, wired up in cmd/janusd)
 // proves *who* is calling - this file decides *what* they're allowed to
 // call, based on the role(s) carried in their verified client
 // certificate's Subject.Organization.
 //
 // requiredRoles is fail-closed by design: a method with no entry defaults
 // to admin-only rather than being silently open. Every RPC in
-// api/proto/haproxyos/v1alpha1 is listed below deliberately, so a new RPC
+// api/proto/janus/v1alpha1 is listed below deliberately, so a new RPC
 // that forgets to be added here is caught immediately (it'll be
 // admin-only until someone decides otherwise, never accidentally
 // reader-accessible).
@@ -26,7 +26,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
-	"github.com/swenske/HAProxyOS/internal/pki"
+	"github.com/swenske/Janus/internal/pki"
 )
 
 var adminOnly = []string{pki.RoleAdmin}
@@ -34,69 +34,69 @@ var adminOrReader = []string{pki.RoleAdmin, pki.RoleReader}
 
 var requiredRoles = map[string][]string{
 	// SystemService
-	"/haproxyos.v1alpha1.SystemService/Version":                     adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Hostname":                    adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Reboot":                      adminOnly,
-	"/haproxyos.v1alpha1.SystemService/Shutdown":                    adminOnly,
-	"/haproxyos.v1alpha1.SystemService/Restart":                     adminOnly,
-	"/haproxyos.v1alpha1.SystemService/Reset":                       adminOnly,
-	"/haproxyos.v1alpha1.SystemService/ApplyConfiguration":          adminOnly,
-	"/haproxyos.v1alpha1.SystemService/Events":                      adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Dmesg":                       adminOnly, // kernel log can leak boot secrets/paths
-	"/haproxyos.v1alpha1.SystemService/Logs":                        adminOnly, // service logs can leak request data
-	"/haproxyos.v1alpha1.SystemService/Stats":                       adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/SystemStat":                  adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Memory":                      adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/CPUInfo":                     adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/LoadAvg":                     adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/DiskStats":                   adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/DiskUsage":                   adminOnly, // walks arbitrary paths
-	"/haproxyos.v1alpha1.SystemService/NetworkDeviceStats":          adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Netstat":                     adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Mounts":                      adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/Processes":                   adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/ServiceList":                 adminOrReader,
-	"/haproxyos.v1alpha1.SystemService/ServiceStart":                adminOnly,
-	"/haproxyos.v1alpha1.SystemService/ServiceStop":                 adminOnly,
-	"/haproxyos.v1alpha1.SystemService/ServiceRestart":              adminOnly,
-	"/haproxyos.v1alpha1.SystemService/List":                        adminOnly, // filesystem access
-	"/haproxyos.v1alpha1.SystemService/Read":                        adminOnly, // can read secrets/keys
-	"/haproxyos.v1alpha1.SystemService/Copy":                        adminOnly, // can read secrets/keys
-	"/haproxyos.v1alpha1.SystemService/PacketCapture":               adminOnly, // can capture unencrypted traffic
-	"/haproxyos.v1alpha1.SystemService/MetaWrite":                   adminOnly,
-	"/haproxyos.v1alpha1.SystemService/MetaDelete":                  adminOnly,
-	"/haproxyos.v1alpha1.SystemService/GenerateClientConfiguration": adminOnly, // issuing credentials is itself a privileged operation
+	"/janus.v1alpha1.SystemService/Version":                     adminOrReader,
+	"/janus.v1alpha1.SystemService/Hostname":                    adminOrReader,
+	"/janus.v1alpha1.SystemService/Reboot":                      adminOnly,
+	"/janus.v1alpha1.SystemService/Shutdown":                    adminOnly,
+	"/janus.v1alpha1.SystemService/Restart":                     adminOnly,
+	"/janus.v1alpha1.SystemService/Reset":                       adminOnly,
+	"/janus.v1alpha1.SystemService/ApplyConfiguration":          adminOnly,
+	"/janus.v1alpha1.SystemService/Events":                      adminOrReader,
+	"/janus.v1alpha1.SystemService/Dmesg":                       adminOnly, // kernel log can leak boot secrets/paths
+	"/janus.v1alpha1.SystemService/Logs":                        adminOnly, // service logs can leak request data
+	"/janus.v1alpha1.SystemService/Stats":                       adminOrReader,
+	"/janus.v1alpha1.SystemService/SystemStat":                  adminOrReader,
+	"/janus.v1alpha1.SystemService/Memory":                      adminOrReader,
+	"/janus.v1alpha1.SystemService/CPUInfo":                     adminOrReader,
+	"/janus.v1alpha1.SystemService/LoadAvg":                     adminOrReader,
+	"/janus.v1alpha1.SystemService/DiskStats":                   adminOrReader,
+	"/janus.v1alpha1.SystemService/DiskUsage":                   adminOnly, // walks arbitrary paths
+	"/janus.v1alpha1.SystemService/NetworkDeviceStats":          adminOrReader,
+	"/janus.v1alpha1.SystemService/Netstat":                     adminOrReader,
+	"/janus.v1alpha1.SystemService/Mounts":                      adminOrReader,
+	"/janus.v1alpha1.SystemService/Processes":                   adminOrReader,
+	"/janus.v1alpha1.SystemService/ServiceList":                 adminOrReader,
+	"/janus.v1alpha1.SystemService/ServiceStart":                adminOnly,
+	"/janus.v1alpha1.SystemService/ServiceStop":                 adminOnly,
+	"/janus.v1alpha1.SystemService/ServiceRestart":              adminOnly,
+	"/janus.v1alpha1.SystemService/List":                        adminOnly, // filesystem access
+	"/janus.v1alpha1.SystemService/Read":                        adminOnly, // can read secrets/keys
+	"/janus.v1alpha1.SystemService/Copy":                        adminOnly, // can read secrets/keys
+	"/janus.v1alpha1.SystemService/PacketCapture":               adminOnly, // can capture unencrypted traffic
+	"/janus.v1alpha1.SystemService/MetaWrite":                   adminOnly,
+	"/janus.v1alpha1.SystemService/MetaDelete":                  adminOnly,
+	"/janus.v1alpha1.SystemService/GenerateClientConfiguration": adminOnly, // issuing credentials is itself a privileged operation
 
 	// LifecycleService - installing/upgrading/rolling back the machine
 	// is always privileged, no reader carve-out.
-	"/haproxyos.v1alpha1.LifecycleService/Install":  adminOnly,
-	"/haproxyos.v1alpha1.LifecycleService/Upgrade":  adminOnly,
-	"/haproxyos.v1alpha1.LifecycleService/Rollback": adminOnly,
+	"/janus.v1alpha1.LifecycleService/Install":  adminOnly,
+	"/janus.v1alpha1.LifecycleService/Upgrade":  adminOnly,
+	"/janus.v1alpha1.LifecycleService/Rollback": adminOnly,
 
 	// HAProxyService
-	"/haproxyos.v1alpha1.HAProxyService/GetConfig":         adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/ApplyConfig":       adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/ValidateConfig":    adminOrReader, // no side effects - validates the caller's own input
-	"/haproxyos.v1alpha1.HAProxyService/Reload":            adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/Stats":             adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/ShowInfo":          adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/BackendList":       adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/ServerSetState":    adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/MapList":           adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/MapGet":            adminOrReader,
-	"/haproxyos.v1alpha1.HAProxyService/MapUpdate":         adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/ACLUpdate":         adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/CertificateList":   adminOrReader, // names/expiry only, not key material
-	"/haproxyos.v1alpha1.HAProxyService/CertificateUpload": adminOnly,
-	"/haproxyos.v1alpha1.HAProxyService/CertificateDelete": adminOnly,
+	"/janus.v1alpha1.HAProxyService/GetConfig":         adminOrReader,
+	"/janus.v1alpha1.HAProxyService/ApplyConfig":       adminOnly,
+	"/janus.v1alpha1.HAProxyService/ValidateConfig":    adminOrReader, // no side effects - validates the caller's own input
+	"/janus.v1alpha1.HAProxyService/Reload":            adminOnly,
+	"/janus.v1alpha1.HAProxyService/Stats":             adminOrReader,
+	"/janus.v1alpha1.HAProxyService/ShowInfo":          adminOrReader,
+	"/janus.v1alpha1.HAProxyService/BackendList":       adminOrReader,
+	"/janus.v1alpha1.HAProxyService/ServerSetState":    adminOnly,
+	"/janus.v1alpha1.HAProxyService/MapList":           adminOrReader,
+	"/janus.v1alpha1.HAProxyService/MapGet":            adminOrReader,
+	"/janus.v1alpha1.HAProxyService/MapUpdate":         adminOnly,
+	"/janus.v1alpha1.HAProxyService/ACLUpdate":         adminOnly,
+	"/janus.v1alpha1.HAProxyService/CertificateList":   adminOrReader, // names/expiry only, not key material
+	"/janus.v1alpha1.HAProxyService/CertificateUpload": adminOnly,
+	"/janus.v1alpha1.HAProxyService/CertificateDelete": adminOnly,
 
 	// NetworkService
-	"/haproxyos.v1alpha1.NetworkService/BGPStatus":            adminOrReader,
-	"/haproxyos.v1alpha1.NetworkService/BGPApplyConfig":       adminOnly,
-	"/haproxyos.v1alpha1.NetworkService/VRRPStatus":           adminOrReader,
-	"/haproxyos.v1alpha1.NetworkService/VRRPApplyConfig":      adminOnly,
-	"/haproxyos.v1alpha1.NetworkService/FirewallList":         adminOrReader,
-	"/haproxyos.v1alpha1.NetworkService/FirewallApplyRuleset": adminOnly,
+	"/janus.v1alpha1.NetworkService/BGPStatus":            adminOrReader,
+	"/janus.v1alpha1.NetworkService/BGPApplyConfig":       adminOnly,
+	"/janus.v1alpha1.NetworkService/VRRPStatus":           adminOrReader,
+	"/janus.v1alpha1.NetworkService/VRRPApplyConfig":      adminOnly,
+	"/janus.v1alpha1.NetworkService/FirewallList":         adminOrReader,
+	"/janus.v1alpha1.NetworkService/FirewallApplyRuleset": adminOnly,
 }
 
 // UnaryAuthInterceptor enforces requiredRoles for unary RPCs.

@@ -1,10 +1,10 @@
 syntax = "proto3";
 
-package haproxyos.v1alpha1;
+package janus.v1alpha1;
 
 import "google/protobuf/empty.proto";
 
-option go_package = "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1";
+option go_package = "github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1";
 
 // NetworkService controls the optional network features (BGP via bird,
 // VRRP via keepalived, firewall via nftables). Each sub-service is a

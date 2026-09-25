@@ -15,7 +15,7 @@ func (ca *CA) CertPool() *x509.CertPool {
 	return pool
 }
 
-// ServerTLSConfig builds the tls.Config for haproxyosd's gRPC listener:
+// ServerTLSConfig builds the tls.Config for janusd's gRPC listener:
 // present serverCert, and require + verify a client certificate signed
 // by this CA on every connection. There is no unauthenticated RPC - see
 // docs/architecture.md.
@@ -28,7 +28,7 @@ func (ca *CA) ServerTLSConfig(serverCert tls.Certificate) *tls.Config {
 	}
 }
 
-// ClientTLSConfig builds a tls.Config for haproxyosctl (or any external
+// ClientTLSConfig builds a tls.Config for janusctl (or any external
 // caller) from PEM-encoded material only - no access to the CA's private
 // key, just its certificate (to verify the server) and a previously
 // issued client certificate/key pair (to authenticate as).

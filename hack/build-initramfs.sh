@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Packages the statically-linked rootfs/init binary - plus any extra
-# files (haproxyosd, haproxy, a bootstrap haproxy.cfg, ...) - into a
+# files (janusd, haproxy, a bootstrap haproxy.cfg, ...) - into a
 # gzip-compressed cpio initramfs. This is the whole "rootfs" for the
 # QEMU boot-test milestones: no squashfs, no overlay, nothing else.
 #
 # Usage: hack/build-initramfs.sh <init-binary> <output.cpio.gz> [src:dest ...]
 #   src  is a local file to include.
-#   dest is its path inside the initramfs (e.g. sbin/haproxyosd).
+#   dest is its path inside the initramfs (e.g. sbin/janusd).
 set -euo pipefail
 
 INIT_BIN="${1:?usage: $0 <init-binary> <output.cpio.gz> [src:dest ...]}"

@@ -45,7 +45,7 @@ func NewManager(binaryPath, configPath, pidPath, statsSocketPath string) *Manage
 // running process or ConfigPath. Returns (true, nil) if valid, or
 // (false, <haproxy's own error lines>) otherwise.
 func (m *Manager) Validate(cfg []byte) (bool, []string) {
-	tmp, err := os.CreateTemp("", "haproxyos-validate-*.cfg")
+	tmp, err := os.CreateTemp("", "janus-validate-*.cfg")
 	if err != nil {
 		return false, []string{err.Error()}
 	}
@@ -65,7 +65,7 @@ func (m *Manager) Validate(cfg []byte) (bool, []string) {
 			// (e.g. it never even started - a bad BinaryPath, a denied
 			// exec) - report *why* the command failed rather than
 			// silently returning an empty error list, which callers
-			// (haproxyosctl, the dashboard's ApplyConfig relay) would
+			// (janusctl, the dashboard's ApplyConfig relay) would
 			// otherwise render as "rejected" with no explanation at all.
 			errs = []string{err.Error()}
 		}
@@ -86,7 +86,7 @@ func (m *Manager) Apply(cfg []byte) ([]string, error) {
 	}
 	// ConfigPath may be the Phase 3 cont'd persistent STATE partition
 	// (see rootfs/init/main.go's mountState) - force it to the
-	// underlying block device now, same reasoning as cmd/haproxyosd's
+	// underlying block device now, same reasoning as cmd/janusd's
 	// PKI bootstrap: don't let an applied config's durability depend on
 	// some later, unrelated sync happening to occur first.
 	syscall.Sync()
@@ -102,7 +102,7 @@ func (m *Manager) Reload() error {
 
 // startOrReload starts haproxy if it isn't running yet, or performs a
 // seamless reload (-sf <old pid>) if it already is. Foreground, no -D:
-// the caller (haproxyosd, itself supervised by rootfs/init) is
+// the caller (janusd, itself supervised by rootfs/init) is
 // responsible for treating this as a managed child process, not letting
 // HAProxy detach on its own.
 func (m *Manager) startOrReload() error {
@@ -163,7 +163,7 @@ func (m *Manager) ShowInfo() (*Info, error) {
 }
 
 // ShowStat runs the stats socket's "show stat" command, returning the
-// raw CSV HAProxy produces (see haproxyos.v1alpha1.HAProxyStatsResponse -
+// raw CSV HAProxy produces (see janus.v1alpha1.HAProxyStatsResponse -
 // this package deliberately doesn't parse it structurally yet).
 func (m *Manager) ShowStat() ([]byte, error) {
 	return m.statsCommand("show stat")

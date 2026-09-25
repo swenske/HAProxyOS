@@ -15,7 +15,7 @@
 #   2. build two release bundles and inject *both* into disk.img's
 #      STATE partition before ever booting it (same debugfs-before-
 #      first-boot reasoning as hack/qemu-lifecycle-upgrade-test.sh -
-#      haproxyosctl and haproxyosd don't share a filesystem across this
+#      janusctl and janusd don't share a filesystem across this
 #      QEMU host/guest boundary):
 #        - "good": just image/release/assemble.sh run against the
 #          *existing* v1 rootfs build output - genuinely new content
@@ -25,10 +25,10 @@
 #          mechanics), so there's no need to build a second rootfs for
 #          this half.
 #        - "broken": a *fresh* rootfs built with the host's own
-#          dynamically-linked /bin/false standing in for haproxyosd
-#          (rootfs/assemble.sh's own <haproxyosd-bin> argument takes
+#          dynamically-linked /bin/false standing in for janusd
+#          (rootfs/assemble.sh's own <janusd-bin> argument takes
 #          anything executable). This rootfs ships no dynamic linker or
-#          libc at all (every real binary in it - init, haproxyosd,
+#          libc at all (every real binary in it - init, janusd,
 #          haproxy - is statically linked, by design), so Supervisor
 #          doesn't even get as far as exec succeeding: every restart
 #          attempt fails at spawn() itself ("no such file or directory"
@@ -38,22 +38,22 @@
 #          spawn-failure path of Supervisor.runOnce, not just the
 #          child-exits-immediately one.
 #        - "haproxy-broken": a *third* fresh rootfs with the real,
-#          working init and haproxyosd, but /bin/false standing in for
+#          working init and janusd, but /bin/false standing in for
 #          *haproxy* itself this time (rootfs/assemble.sh's
-#          <haproxy-bin> argument, not <haproxyosd-bin>) - haproxyosd
+#          <haproxy-bin> argument, not <janusd-bin>) - janusd
 #          starts up perfectly fine (it's the real binary), calls
 #          internal/haproxy.Manager.Reload(), which fails and is logged
-#          but not fatal (matching cmd/haproxyosd/main.go's existing
+#          but not fatal (matching cmd/janusd/main.go's existing
 #          "continue without it" behavior for a missing/broken haproxy),
 #          and HAProxy's stats socket simply never comes into existence
 #          - so every ShowInfo() call inside
-#          cmd/haproxyosd's own confirmBootHealth goroutine fails
+#          cmd/janusd's own confirmBootHealth goroutine fails
 #          forever. This is what actually exercises the real,
 #          HAProxy-level health check this test is named for - the
 #          *other* "broken" bundle above only ever exercises rootfs/
-#          init's own Supervisor-level backstop (haproxyosd itself never
+#          init's own Supervisor-level backstop (janusd itself never
 #          running at all), a different, complementary failure mode.
-#   3. calls `haproxyosctl lifecycle upgrade -wait-for-health
+#   3. calls `janusctl lifecycle upgrade -wait-for-health
 #      -health-timeout 5` with the "good" bundle - the guest reboots
 #      into slot B for real, and after health-timeout-plus-a-margin, the
 #      console must show "bootcommit: confirmed healthy" and the kernel
@@ -61,7 +61,7 @@
 #   4. calls the same RPC again with the "broken" (daemon-broken)
 #      bundle, targeting whichever slot is inactive at that point (A,
 #      since step 3 left B active) - the guest reboots into slot A,
-#      haproxyosd (really /bin/false) crash-loops immediately, and -
+#      janusd (really /bin/false) crash-loops immediately, and -
 #      entirely on its own, no RPC involved - Supervisor's GiveUpAfter
 #      elapses and the node reverts and reboots a *second* time, this
 #      time back to slot B (RevertTo was recorded as whatever was active
@@ -73,27 +73,27 @@
 #      targeting whichever slot is inactive at that point (A again,
 #      since step 4 left B active) - the guest reboots into slot A for
 #      real (proving *this* rootfs, unlike the daemon-broken one, boots
-#      and runs haproxyosd just fine), and - again with no RPC involved,
-#      this time via cmd/haproxyosd's own confirmBootHealth rather than
+#      and runs janusd just fine), and - again with no RPC involved,
+#      this time via cmd/janusd's own confirmBootHealth rather than
 #      rootfs/init's GiveUpAfter - reverts and reboots a second time,
 #      back to slot B once more.
 #
-# Usage: hack/qemu-lifecycle-upgrade-health-test.sh <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>
+# Usage: hack/qemu-lifecycle-upgrade-health-test.sh <disk.img> <bzImage> <build-dir> <janusctl-bin>
 # Same inputs as hack/qemu-lifecycle-upgrade-test.sh.
 set -euo pipefail
 
 export PATH="$PATH:/usr/sbin:/sbin"
 
-DISK="${1:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-KERNEL="${2:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-BUILD_DIR="${3:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
-CTL="${4:?usage: $0 <disk.img> <bzImage> <build-dir> <haproxyosctl-bin>}"
+DISK="${1:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+KERNEL="${2:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+BUILD_DIR="${3:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
+CTL="${4:?usage: $0 <disk.img> <bzImage> <build-dir> <janusctl-bin>}"
 HTTP_TIMEOUT_SECS="${QEMU_UPGRADE_HEALTH_HTTP_TIMEOUT:-40}"
 REBOOT_TIMEOUT_SECS="${QEMU_UPGRADE_HEALTH_REBOOT_TIMEOUT:-60}"
 HEALTH_TIMEOUT_SECS="${QEMU_UPGRADE_HEALTH_TIMEOUT:-5}"
 HOST_PORT_8080="${QEMU_UPGRADE_HEALTH_TEST_PORT:-18095}"
 HOST_GRPC_PORT="${QEMU_UPGRADE_HEALTH_GRPC_PORT:-18096}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
@@ -117,15 +117,15 @@ BROKEN_ROOTFS="$WORKDIR/rootfs-broken"
 mkdir -p "$BROKEN_ROOTFS"
 "$SELF_DIR/../rootfs/assemble.sh" "$BROKEN_ROOTFS" "$BUILD_DIR/init" /bin/false \
   "$BUILD_DIR/haproxy" "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg" \
-  "$BUILD_DIR/selinux/hapos.policy"
+  "$BUILD_DIR/selinux/janus.policy"
 BROKEN_BUNDLE="$WORKDIR/bundle-broken"
 "$SELF_DIR/../image/release/assemble.sh" "$BROKEN_BUNDLE" "$KERNEL" "$BROKEN_ROOTFS"
 
 HAPROXY_BROKEN_ROOTFS="$WORKDIR/rootfs-haproxy-broken"
 mkdir -p "$HAPROXY_BROKEN_ROOTFS"
-"$SELF_DIR/../rootfs/assemble.sh" "$HAPROXY_BROKEN_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/haproxyosd" \
+"$SELF_DIR/../rootfs/assemble.sh" "$HAPROXY_BROKEN_ROOTFS" "$BUILD_DIR/init" "$BUILD_DIR/janusd" \
   /bin/false "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg" \
-  "$BUILD_DIR/selinux/hapos.policy"
+  "$BUILD_DIR/selinux/janus.policy"
 HAPROXY_BROKEN_BUNDLE="$WORKDIR/bundle-haproxy-broken"
 "$SELF_DIR/../image/release/assemble.sh" "$HAPROXY_BROKEN_BUNDLE" "$KERNEL" "$HAPROXY_BROKEN_ROOTFS"
 
@@ -279,7 +279,7 @@ echo "Slot B (good) OK: real gRPC Upgrade with wait_for_health installed it and 
 
 # Wait comfortably past HEALTH_TIMEOUT_SECS and confirm it actually got
 # confirmed - not just "hasn't reverted yet, but might still" - via
-# cmd/haproxyosd's own real HAProxy-level check (internal/
+# cmd/janusd's own real HAProxy-level check (internal/
 # bootcommit.Confirm), not rootfs/init inferring health from mere
 # process survival (that inference doesn't exist any more - see
 # rootfs/init/main.go's own comment on why it was removed once this
@@ -311,7 +311,7 @@ if ! echo "$BROKEN_OUT" | grep -qi "rebooting"; then
   exit 1
 fi
 
-# The broken slot's haproxyosd (/bin/false) never answers HTTP - wait on
+# The broken slot's janusd (/bin/false) never answers HTTP - wait on
 # the boot marker instead to confirm the guest genuinely rebooted into it.
 DEADLINE=$((SECONDS + REBOOT_TIMEOUT_SECS))
 while [ "$(marker_count "$LOG")" -lt 3 ] && [ "$SECONDS" -lt "$DEADLINE" ]; do sleep 1; done
@@ -341,8 +341,8 @@ assert_boot_n "$LOG" 4 /dev/vda4 /dev/vda5 "$GOOD_HASH" "post-auto-revert boot"
 echo "Part 2 OK: unhealthy upgrade auto-reverted to slot B (not a fixed fallback to slot A) and rebooted, entirely on its own"
 
 # =========================================================================
-# Part 3: HAProxy itself (not haproxyosd) never comes up - proves
-# cmd/haproxyosd's own real HAProxy-level confirmBootHealth path
+# Part 3: HAProxy itself (not janusd) never comes up - proves
+# cmd/janusd's own real HAProxy-level confirmBootHealth path
 # specifically, not just rootfs/init's Supervisor-level backstop Part 2
 # already covered.
 # =========================================================================
@@ -354,8 +354,8 @@ if ! echo "$HAPROXY_BROKEN_OUT" | grep -qi "rebooting"; then
   exit 1
 fi
 
-# haproxyosd itself is the *real* binary here and starts fine - unlike
-# Part 2, wait on the boot marker AND haproxyosd's own "confirming
+# janusd itself is the *real* binary here and starts fine - unlike
+# Part 2, wait on the boot marker AND janusd's own "confirming
 # health" log line, proving this boot's control-plane daemon genuinely
 # came up (not just the kernel), before HAProxy's own absence is what
 # eventually triggers the revert.
@@ -367,15 +367,15 @@ if [ "$(marker_count "$LOG")" -lt 5 ]; then
   exit 1
 fi
 if ! grep -q "bootcommit: confirming health for slot A" "$LOG"; then
-  echo "Upgrade health test FAILED: haproxyosd never started its own health confirmation for slot A - did haproxyosd itself fail to start too?" >&2
+  echo "Upgrade health test FAILED: janusd never started its own health confirmation for slot A - did janusd itself fail to start too?" >&2
   echo "--- console output ---" >&2; cat "$LOG" >&2
   exit 1
 fi
 HAPROXY_BROKEN_HASH="$(cat "$HAPROXY_BROKEN_BUNDLE/rootfs.roothash")"
 assert_boot_n "$LOG" 5 /dev/vda2 /dev/vda3 "$HAPROXY_BROKEN_HASH" "post-'haproxy-broken'-upgrade boot"
-echo "Slot A (haproxy-broken) OK: haproxyosd itself came up for real and started confirming health"
+echo "Slot A (haproxy-broken) OK: janusd itself came up for real and started confirming health"
 
-# The autonomous revert this time comes from cmd/haproxyosd's own
+# The autonomous revert this time comes from cmd/janusd's own
 # confirmBootHealth, not rootfs/init's GiveUpAfter - confirm the
 # distinguishing log line, not just "some revert happened".
 if ! wait_http_and_marker "$HOST_PORT_8080" "$LOG" 6 $((HEALTH_TIMEOUT_SECS + REBOOT_TIMEOUT_SECS)); then
@@ -384,11 +384,11 @@ if ! wait_http_and_marker "$HOST_PORT_8080" "$LOG" 6 $((HEALTH_TIMEOUT_SECS + RE
   exit 1
 fi
 if ! grep -q "bootcommit: rebooting to complete the revert to slot B" "$LOG"; then
-  echo "Upgrade health test FAILED: console never logged cmd/haproxyosd's own revert-to-slot-B line" >&2
+  echo "Upgrade health test FAILED: console never logged cmd/janusd's own revert-to-slot-B line" >&2
   echo "--- console output ---" >&2; cat "$LOG" >&2
   exit 1
 fi
 assert_boot_n "$LOG" 6 /dev/vda4 /dev/vda5 "$GOOD_HASH" "post-second-auto-revert boot"
-echo "Part 3 OK: HAProxy-level health check (not just haproxyosd process survival) caught a broken HAProxy and reverted+rebooted, entirely on its own"
+echo "Part 3 OK: HAProxy-level health check (not just janusd process survival) caught a broken HAProxy and reverted+rebooted, entirely on its own"
 
-echo "Upgrade health test OK: wait_for_health confirms a healthy upgrade and stays; reverts+reboots automatically both when haproxyosd itself can't stay up (rootfs/init) and when haproxyosd runs fine but HAProxy never comes up (cmd/haproxyosd's own real health check)"
+echo "Upgrade health test OK: wait_for_health confirms a healthy upgrade and stays; reverts+reboots automatically both when janusd itself can't stay up (rootfs/init) and when janusd runs fine but HAProxy never comes up (cmd/janusd's own real health check)"

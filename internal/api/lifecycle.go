@@ -15,19 +15,19 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
-	"github.com/swenske/HAProxyOS/internal/bootcommit"
-	"github.com/swenske/HAProxyOS/internal/bootslot"
-	"github.com/swenske/HAProxyOS/internal/espswitch"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
+	"github.com/swenske/Janus/internal/bootcommit"
+	"github.com/swenske/Janus/internal/bootslot"
+	"github.com/swenske/Janus/internal/espswitch"
 )
 
-// Lifecycle implements haproxyosv1alpha1.LifecycleServiceServer.
+// Lifecycle implements janusv1alpha1.LifecycleServiceServer.
 //
 // Rollback and Upgrade share a core trick: the running node can never
 // shell out to `ukify`/`sbsign` (no package manager, by design), so both
 // just move already-built UKIs into place instead of ever assembling
 // one. Rollback moves a UKI image/disk/activate-slot.sh already staged at
-// build/install time (\HAPROXYOS\UKI-A.EFI / UKI-B.EFI); Upgrade moves one
+// build/install time (\JANUS\UKI-A.EFI / UKI-B.EFI); Upgrade moves one
 // that arrived as part of a "release bundle" (image/release/assemble.sh) -
 // which exists specifically because a genuinely *new* rootfs has a root
 // hash nobody could have pre-staged at the original install's build time.
@@ -39,7 +39,7 @@ import (
 // never builds a UKI, taking both slots' pre-built ones from the same
 // kind of release bundle Upgrade reads from.
 type Lifecycle struct {
-	haproxyosv1alpha1.UnimplementedLifecycleServiceServer
+	janusv1alpha1.UnimplementedLifecycleServiceServer
 }
 
 // Fixed partition sizes, matching image/disk/assemble.sh's own
@@ -124,7 +124,7 @@ func writePartitionFile(device string, data []byte) error {
 	return err
 }
 
-func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1alpha1.RollbackResponse, error) {
+func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*janusv1alpha1.RollbackResponse, error) {
 	bc, err := resolveBootContext()
 	if err != nil {
 		return nil, err
@@ -139,7 +139,7 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 
 	scheduleReboot()
 
-	return &haproxyosv1alpha1.RollbackResponse{ActiveSlot: bc.targetSlot}, nil
+	return &janusv1alpha1.RollbackResponse{ActiveSlot: bc.targetSlot}, nil
 }
 
 // Upgrade writes a new rootfs to the currently-inactive A/B slot from a
@@ -156,7 +156,7 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 //
 // wait_for_health, when true, writes a persistent "boot pending
 // confirmation" marker to STATE (internal/bootcommit) before switching
-// the ESP and rebooting - the *next* boot's own cmd/haproxyosd checks
+// the ESP and rebooting - the *next* boot's own cmd/janusd checks
 // it at startup and, in the background, polls HAProxy's own stats
 // socket (internal/haproxy.Manager.ShowInfo) until it succeeds
 // repeatedly in a row, confirming the marker (internal/
@@ -170,17 +170,17 @@ func (l *Lifecycle) Rollback(_ context.Context, _ *emptypb.Empty) (*haproxyosv1a
 // nor a possible revert is ever visible over gRPC, only in the node's
 // own logs and the eventual slot it comes back up on. A second,
 // independent safety net (rootfs/init's Supervisor.GiveUpAfter) covers
-// the one failure mode cmd/haproxyosd's own check can't: haproxyosd
+// the one failure mode cmd/janusd's own check can't: janusd
 // crashing too fast, or too often, to ever get a chance to run that
 // check at all.
-func (l *Lifecycle) Upgrade(req *haproxyosv1alpha1.UpgradeRequest, stream haproxyosv1alpha1.LifecycleService_UpgradeServer) error {
+func (l *Lifecycle) Upgrade(req *janusv1alpha1.UpgradeRequest, stream janusv1alpha1.LifecycleService_UpgradeServer) error {
 	bundleDir := req.GetSource().GetReference()
 	if bundleDir == "" {
 		return status.Errorf(codes.InvalidArgument, "source.reference is required - a local release bundle directory (see image/release/assemble.sh); real OCI/HTTPS distribution isn't implemented yet")
 	}
 
 	send := func(stage string, progress float64, message string) error {
-		return stream.Send(&haproxyosv1alpha1.UpgradeResponse{Stage: stage, Progress: progress, Message: message})
+		return stream.Send(&janusv1alpha1.UpgradeResponse{Stage: stage, Progress: progress, Message: message})
 	}
 
 	bc, err := resolveBootContext()
@@ -262,7 +262,7 @@ func (l *Lifecycle) Upgrade(req *haproxyosv1alpha1.UpgradeRequest, stream haprox
 		return status.Errorf(codes.Internal, "%v", err)
 	}
 	writeErr := func() error {
-		stagedPath := filepath.Join(espswitch.Mountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", bc.targetSlot))
+		stagedPath := filepath.Join(espswitch.Mountpoint, "JANUS", fmt.Sprintf("UKI-%s.EFI", bc.targetSlot))
 		if err := os.WriteFile(stagedPath, uki, 0o644); err != nil {
 			return fmt.Errorf("write %s: %w", stagedPath, err)
 		}

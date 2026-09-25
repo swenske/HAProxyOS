@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Generates HAProxyOS's real Secure Boot signing key + certificate -
+# Generates Janus's real Secure Boot signing key + certificate -
 # unlike gen-test-key.sh (throwaway, regenerated fresh every CI run),
 # this is meant to be run ONCE, by a human, outside of CI: the result
-# is a long-term root of trust every HAProxyOS node's firmware will be
+# is a long-term root of trust every Janus node's firmware will be
 # asked to enroll into its Secure Boot db. Losing the private key means
 # losing the ability to sign future updates for already-enrolled nodes;
 # leaking it means anyone can sign a UKI those nodes will boot.
@@ -44,10 +44,10 @@ umask 077
 openssl req -x509 -newkey rsa:4096 \
   -keyout "$OUT_DIR/key.pem" -out "$OUT_DIR/cert.pem" \
   -nodes -days 7300 \
-  -subj "/CN=HAProxyOS Secure Boot signing key" \
+  -subj "/CN=Janus Secure Boot signing key" \
   >/dev/null 2>&1
 
-echo "Wrote $OUT_DIR/{key.pem,cert.pem} - HAProxyOS's real Secure Boot signing key."
+echo "Wrote $OUT_DIR/{key.pem,cert.pem} - Janus's real Secure Boot signing key."
 echo
 echo "Next steps (do these now, in this order):"
 echo "  1. Back up $OUT_DIR/key.pem somewhere safe and durable (a password"

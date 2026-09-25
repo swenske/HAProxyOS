@@ -2,7 +2,7 @@
 // where's the rest of the disk (ESP, STATE)" by parsing the running
 // kernel's own /proc/cmdline - the one thing every boot mode (rootfs/
 // init's real single-disk layout, its older separate-drives test
-// harnesses, haproxyosd running on an already-booted node) can read
+// harnesses, janusd running on an already-booted node) can read
 // without any other input. Used by rootfs/init (mounting STATE at
 // boot - see mountState in rootfs/init/main.go) and by
 // internal/api/lifecycle.go's LifecycleService.Rollback (finding the

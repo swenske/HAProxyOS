@@ -7,7 +7,7 @@ import "net"
 // a self-signed server certificate alongside 127.0.0.1/localhost, so a
 // client dialing over the host's real address (not just loopback) can
 // verify the handshake. Two real consumers as of this writing:
-// cmd/haproxyosd (the node's own server cert, keyed to its real LAN
+// cmd/janusd (the node's own server cert, keyed to its real LAN
 // IP - found missing when a dashboard add-node call over a node's real
 // IP failed TLS verification outright) and dashboard/backend (the
 // dashboard's own per-node-listener identity, keyed to whatever host a

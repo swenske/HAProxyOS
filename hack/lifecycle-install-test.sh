@@ -3,7 +3,7 @@
 # disk from scratch (internal/diskimage + github.com/diskfs/go-diskfs -
 # sgdisk/mtools/mkfs.ext4 don't exist on the target OS, see internal/
 # api/install.go's own doc comment) and produces a real, independently
-# bootable HAProxyOS image, and that its two safety refusals - an
+# bootable Janus image, and that its two safety refusals - an
 # already-installed disk, and the disk this node itself is currently
 # booted from - both actually reject in practice, not just in code
 # review.
@@ -11,7 +11,7 @@
 # Unlike every other lifecycle test in this project, the Install call
 # itself doesn't need to run inside a VM: Install has no A/B/STATE
 # machinery of its own to depend on (it's what *creates* that machinery
-# on a blank target), so haproxyosd runs natively on the test host here
+# on a blank target), so janusd runs natively on the test host here
 # - the same pattern image-build.yml's own "HAProxy gRPC API integration
 # test" step already uses, reading its bootstrapped PKI creds straight
 # off -pki-dir rather than scraping a QEMU console log for them. Only
@@ -23,11 +23,11 @@
 #      *existing* rootfs build output - genuinely-new-content isn't the
 #      point here, hack/qemu-lifecycle-upgrade-test.sh already proves
 #      that.
-#   2. run haproxyosd natively (root, for CAP_SYS_CHROOT - haproxy's
+#   2. run janusd natively (root, for CAP_SYS_CHROOT - haproxy's
 #      chroot() needs it, same reasoning as image-build.yml's own
 #      integration test step), read its bootstrapped admin/CA creds
 #      straight from -pki-dir.
-#   3. call `haproxyosctl lifecycle install` against a freshly
+#   3. call `janusctl lifecycle install` against a freshly
 #      truncated, empty *file* standing in for a blank disk -
 #      go-diskfs works identically against a real block device or a
 #      plain file (confirmed empirically - a full GPT+ext4+FAT32 disk
@@ -46,7 +46,7 @@
 #   6. extract fresh PKI creds from the *booted* instance's own STATE
 #      partition (via debugfs, same reasoning as every other lifecycle
 #      test here - a script can't watch a live console the way a human
-#      doing this for real would), then call `haproxyosctl lifecycle
+#      doing this for real would), then call `janusctl lifecycle
 #      install` against /dev/vda -
 #      the disk this now-running instance actually booted from - and
 #      confirm it's refused (refuseIfCurrentBootDisk). This is the one
@@ -58,18 +58,18 @@
 #      content and UKI to both slots, this proves that claim for real
 #      rather than only ever having booted slot A.
 #
-# Usage: hack/lifecycle-install-test.sh <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>
+# Usage: hack/lifecycle-install-test.sh <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>
 # <rootfs-dir> must contain rootfs.squashfs/rootfs.verity/rootfs.roothash
 # (rootfs/assemble.sh's output for the *existing* build).
 set -euo pipefail
 
 export PATH="$PATH:/usr/sbin:/sbin"
 
-ROOTFS_DIR="${1:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>}"
-KERNEL="${2:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>}"
-HAPROXY_BIN="${3:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>}"
-HAPROXYOSD_BIN="${4:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>}"
-CTL_REL="${5:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <haproxyosd-bin> <haproxyosctl-bin>}"
+ROOTFS_DIR="${1:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>}"
+KERNEL="${2:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>}"
+HAPROXY_BIN="${3:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>}"
+JANUSD_BIN="${4:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>}"
+CTL_REL="${5:?usage: $0 <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin>}"
 CTL="$(cd "$(dirname "$CTL_REL")" && pwd)/$(basename "$CTL_REL")"
 
 # 512MiB comfortably clears internal/diskimage.Compute's real minimum
@@ -81,7 +81,7 @@ HTTP_TIMEOUT_SECS="${INSTALL_TEST_HTTP_TIMEOUT:-40}"
 HOST_PORT="${INSTALL_TEST_PORT:-18097}"
 HOST_GRPC_PORT="${INSTALL_TEST_GRPC_PORT:-18098}"
 NATIVE_PORT="${INSTALL_TEST_NATIVE_GRPC_PORT:-19507}"
-MARKER="HAPROXYOS_INIT_BOOT_OK"
+MARKER="JANUS_INIT_BOOT_OK"
 FIRST_BOOT_MSG="pki: first boot - generated a new CA"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
@@ -91,7 +91,7 @@ OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
 
 SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKDIR="$(mktemp -d)"
-HAPROXYOSD_PID=""
+JANUSD_PID=""
 QEMU_PID=""
 # Real bug caught by a real CI run, not assumed: this cleanup trap used
 # to kill the native haproxy child with `sudo pkill -f "$HAPROXY_BIN"`
@@ -102,16 +102,16 @@ QEMU_PID=""
 # killing *this script's own process*, mid-trap, right after its very
 # last echo - `make` reported it as "Terminated" (exit 2) despite every
 # single check already having passed and printed. Fixed by killing the
-# real haproxy process by its own pid (haproxyosd's default
+# real haproxy process by its own pid (janusd's default
 # `-haproxy-pid` path), never by a fuzzy command-line pattern match.
-# cmd/haproxyosd has no SIGTERM handler that propagates to its haproxy
-# child, so killing haproxyosd alone (below) leaves haproxy an orphan,
+# cmd/janusd has no SIGTERM handler that propagates to its haproxy
+# child, so killing janusd alone (below) leaves haproxy an orphan,
 # reparented to init, still bound to :8080 - confirmed the hard way on
-# haproxyos-runner01 itself: a real CI run's *next* job started with
+# janus-runner01 itself: a real CI run's *next* job started with
 # :8080 already taken, tracked back to a leftover `build/haproxy`
 # process whose start time lined up exactly with this test's own native
 # phase. A first fix tried killing by pid from haproxy's own -p pid
-# file (/run/haproxyos/haproxy.pid) - wrong in a different way:
+# file (/run/janus/haproxy.pid) - wrong in a different way:
 # internal/haproxy.Manager's seamless-reload path (-sf <old pid>, taken
 # whenever that pid file already exists from an earlier run of this
 # same test) leaves the *previous* instance to soft-stop-drain rather
@@ -133,7 +133,7 @@ kill_native_haproxy() {
   sudo pkill -x -9 haproxy 2>/dev/null || true
 }
 cleanup() {
-  [ -n "$HAPROXYOSD_PID" ] && sudo kill "$HAPROXYOSD_PID" 2>/dev/null || true
+  [ -n "$JANUSD_PID" ] && sudo kill "$JANUSD_PID" 2>/dev/null || true
   kill_native_haproxy
   [ -n "$QEMU_PID" ] && kill "$QEMU_PID" 2>/dev/null || true
   # sudo, not plain rm: $WORKDIR/pki is 0700 root-owned
@@ -150,30 +150,30 @@ BUNDLE="$WORKDIR/bundle"
 SHA256="$(cat "$BUNDLE/rootfs.squashfs.sha256")"
 
 # =========================================================================
-# Part 2: run haproxyosd natively and install onto a blank file.
+# Part 2: run janusd natively and install onto a blank file.
 # =========================================================================
 PKI_DIR="$WORKDIR/pki"
-sudo mkdir -p /run/haproxyos /etc/haproxy /etc/haproxyos
+sudo mkdir -p /run/janus /etc/haproxy /etc/janus
 sudo cp "$SELF_DIR/../rootfs/base/etc/haproxy/haproxy.cfg" /etc/haproxy/haproxy.cfg
 sudo mkdir -p /var/empty && sudo chmod 000 /var/empty
 
-sudo "$HAPROXYOSD_BIN" -addr ":$NATIVE_PORT" -haproxy-binary "$HAPROXY_BIN" -pki-dir "$PKI_DIR" \
+sudo "$JANUSD_BIN" -addr ":$NATIVE_PORT" -haproxy-binary "$HAPROXY_BIN" -pki-dir "$PKI_DIR" \
   > "$WORKDIR/native.log" 2>&1 &
-HAPROXYOSD_PID=$!
+JANUSD_PID=$!
 
 # internal/pki.LoadOrBootstrap creates -pki-dir 0700, owned by root
-# (haproxyosd runs under sudo, for CAP_SYS_CHROOT) - the invoking
+# (janusd runs under sudo, for CAP_SYS_CHROOT) - the invoking
 # non-root user can't even traverse into it, so every check/read
-# against $PKI_DIR needs sudo too, not just the haproxyosctl calls.
+# against $PKI_DIR needs sudo too, not just the janusctl calls.
 DEADLINE=$((SECONDS + 20))
 while ! sudo test -s "$PKI_DIR/admin.crt" && [ "$SECONDS" -lt "$DEADLINE" ]; do sleep 1; done
 if ! sudo test -s "$PKI_DIR/admin.crt"; then
-  echo "Install test FAILED: haproxyosd never bootstrapped PKI at $PKI_DIR within 20s" >&2
-  echo "--- native haproxyosd log ---" >&2; cat "$WORKDIR/native.log" >&2
+  echo "Install test FAILED: janusd never bootstrapped PKI at $PKI_DIR within 20s" >&2
+  echo "--- native janusd log ---" >&2; cat "$WORKDIR/native.log" >&2
   exit 1
 fi
 NATIVE_CTL_ARGS=(-endpoint "127.0.0.1:${NATIVE_PORT}" -ca "$PKI_DIR/ca.crt" -cert "$PKI_DIR/admin.crt" -key "$PKI_DIR/admin.key")
-echo "Native haproxyosd OK: PKI bootstrapped at $PKI_DIR"
+echo "Native janusd OK: PKI bootstrapped at $PKI_DIR"
 
 BLANK_DISK="$WORKDIR/blank-disk.img"
 truncate -s "${DISK_MB}M" "$BLANK_DISK"
@@ -204,9 +204,9 @@ fi
 grep -qi "already has a" "$WORKDIR/reinstall-denied.log" || { echo "Install test FAILED: expected an 'already has a ... partition' refusal, got:" >&2; cat "$WORKDIR/reinstall-denied.log" >&2; exit 1; }
 echo "Part 3 OK: a second Install onto the same disk was correctly refused"
 
-sudo kill "$HAPROXYOSD_PID" 2>/dev/null || true
-wait "$HAPROXYOSD_PID" 2>/dev/null || true
-HAPROXYOSD_PID=""
+sudo kill "$JANUSD_PID" 2>/dev/null || true
+wait "$JANUSD_PID" 2>/dev/null || true
+JANUSD_PID=""
 kill_native_haproxy
 
 # =========================================================================

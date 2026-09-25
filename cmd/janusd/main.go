@@ -1,6 +1,6 @@
-// Command haproxyosd is the HAProxyOS control-plane daemon: it serves the
+// Command janusd is the Janus control-plane daemon: it serves the
 // SystemService/LifecycleService/HAProxyService/NetworkService gRPC API
-// (see api/proto/haproxyos/v1alpha1) that haproxyosctl and any external
+// (see api/proto/janus/v1alpha1) that janusctl and any external
 // controller use instead of SSH.
 //
 // mTLS is mandatory on every connection (internal/pki) - there is no
@@ -29,12 +29,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	haproxyosv1alpha1 "github.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1"
-	"github.com/swenske/HAProxyOS/internal/api"
-	"github.com/swenske/HAProxyOS/internal/bootcommit"
-	"github.com/swenske/HAProxyOS/internal/bootrevert"
-	"github.com/swenske/HAProxyOS/internal/haproxy"
-	"github.com/swenske/HAProxyOS/internal/pki"
+	janusv1alpha1 "github.com/swenske/Janus/gen/janus/v1alpha1"
+	"github.com/swenske/Janus/internal/api"
+	"github.com/swenske/Janus/internal/bootcommit"
+	"github.com/swenske/Janus/internal/bootrevert"
+	"github.com/swenske/Janus/internal/haproxy"
+	"github.com/swenske/Janus/internal/pki"
 )
 
 // version is set via -ldflags "-X main.version=..." by the release build
@@ -44,22 +44,22 @@ var version = "dev"
 func main() {
 	showVersion := flag.Bool("version", false, "print the daemon version and exit")
 	addr := flag.String("addr", ":9505", "gRPC listen address")
-	pkiDir := flag.String("pki-dir", "/etc/haproxyos/pki", "directory holding the node's CA/server/admin certificates (generated here on first boot)")
+	pkiDir := flag.String("pki-dir", "/etc/janus/pki", "directory holding the node's CA/server/admin certificates (generated here on first boot)")
 	haproxyBin := flag.String("haproxy-binary", "/usr/local/sbin/haproxy", "path to the haproxy binary")
 	haproxyCfg := flag.String("haproxy-config", "/etc/haproxy/haproxy.cfg", "path to haproxy's active config file")
-	haproxyPid := flag.String("haproxy-pid", "/run/haproxyos/haproxy.pid", "path to haproxy's pid file")
-	haproxySock := flag.String("haproxy-stats-socket", "/run/haproxyos/haproxy-admin.sock", "path to haproxy's stats socket (must match the 'stats socket' line in haproxy-config)")
+	haproxyPid := flag.String("haproxy-pid", "/run/janus/haproxy.pid", "path to haproxy's pid file")
+	haproxySock := flag.String("haproxy-stats-socket", "/run/janus/haproxy-admin.sock", "path to haproxy's stats socket (must match the 'stats socket' line in haproxy-config)")
 	haproxyChrootDir := flag.String("haproxy-chroot-dir", "/var/empty", "directory haproxy chroots into after binding listeners and dropping privileges (must match the 'chroot' line in haproxy-config); created here since this rootfs has no package manager to have provisioned it")
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("haproxyosd " + version)
+		fmt.Println("janusd " + version)
 		return
 	}
 
 	hostname, err := os.Hostname()
 	if err != nil {
-		hostname = "haproxyos"
+		hostname = "janus"
 	}
 
 	pkiBootstrap, err := pki.LoadOrBootstrap(*pkiDir, hostname, pki.LocalIPs())
@@ -73,12 +73,12 @@ func main() {
 		// alongside the admin cert/key anyway, not just left to a
 		// separate STATE-partition extraction, since a console reader
 		// bootstrapping a node needs all three to actually connect
-		// (haproxyosctl's -ca/-cert/-key) and splitting them across two
+		// (janusctl's -ca/-cert/-key) and splitting them across two
 		// different recovery paths for one single one-time event was
 		// real friction, not a meaningful security boundary - whoever
 		// can read this console already has the admin cert/key printed
 		// right below, which is the actually sensitive half.
-		log.Printf("pki: CA CERTIFICATE (needed for haproxyosctl's -ca flag):\n%s", pkiBootstrap.CA.CertPEM)
+		log.Printf("pki: CA CERTIFICATE (needed for janusctl's -ca flag):\n%s", pkiBootstrap.CA.CertPEM)
 		log.Printf("pki: ADMIN CERTIFICATE (save this now, it will not be printed again):\n%s%s", pkiBootstrap.AdminCertPEM, pkiBootstrap.AdminKeyPEM)
 		// pkiDir may be the Phase 3 cont'd persistent STATE partition
 		// (see rootfs/init/main.go's mountState) - force these bytes to
@@ -141,12 +141,12 @@ func main() {
 		grpc.UnaryInterceptor(api.UnaryAuthInterceptor),
 		grpc.StreamInterceptor(api.StreamAuthInterceptor),
 	)
-	haproxyosv1alpha1.RegisterSystemServiceServer(srv, &api.System{BuildVersion: version, CA: pkiBootstrap.CA})
-	haproxyosv1alpha1.RegisterLifecycleServiceServer(srv, &api.Lifecycle{})
-	haproxyosv1alpha1.RegisterHAProxyServiceServer(srv, &api.HAProxy{Manager: haproxyMgr})
-	haproxyosv1alpha1.RegisterNetworkServiceServer(srv, &api.Network{})
+	janusv1alpha1.RegisterSystemServiceServer(srv, &api.System{BuildVersion: version, CA: pkiBootstrap.CA})
+	janusv1alpha1.RegisterLifecycleServiceServer(srv, &api.Lifecycle{})
+	janusv1alpha1.RegisterHAProxyServiceServer(srv, &api.HAProxy{Manager: haproxyMgr})
+	janusv1alpha1.RegisterNetworkServiceServer(srv, &api.Network{})
 
-	log.Printf("haproxyosd %s listening on %s (mTLS required)", version, *addr)
+	log.Printf("janusd %s listening on %s (mTLS required)", version, *addr)
 	if err := srv.Serve(lis); err != nil {
 		fmt.Fprintln(os.Stderr, "serve:", err)
 		os.Exit(1)
@@ -167,7 +167,7 @@ const (
 // confirmBootHealth runs internal/bootcommit.Confirm against a real
 // HAProxy health signal (ShowInfo succeeding means the stats socket is
 // up and answering, which requires the haproxy process itself to
-// actually be running - not just that this daemon, haproxyosd, is)
+// actually be running - not just that this daemon, janusd, is)
 // and, on failure, reverts back to marker.RevertTo the same way
 // rootfs/init's own boot-time revert path does (internal/bootrevert),
 // then reboots. Meant to run in its own goroutine - it blocks for up to
@@ -204,4 +204,3 @@ func confirmBootHealth(marker *bootcommit.Marker, mgr *haproxy.Manager) {
 	// !confirmed && err == nil: the revert (and reboot) succeeded -
 	// nothing further to do, the machine is already on its way down.
 }
-

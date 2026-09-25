@@ -4,7 +4,7 @@
 // tooling, ever, on the node: the target OS has no package manager and
 // can never shell out to ukify/sbsign itself, which is exactly why
 // image/disk/activate-slot.sh stages *both* slots' UKIs on the ESP
-// (\HAPROXYOS\UKI-A.EFI / UKI-B.EFI) at build/install time in the first
+// (\JANUS\UKI-A.EFI / UKI-B.EFI) at build/install time in the first
 // place.
 //
 // Shared by two independent processes that both need this same
@@ -28,7 +28,7 @@ import (
 // Mountpoint is under /run, which rootfs/init/main.go's mountEphemeral
 // already makes a fresh tmpfs on every boot - nothing pre-existing
 // there needs preserving.
-const Mountpoint = "/run/haproxyos/esp"
+const Mountpoint = "/run/janus/esp"
 
 // ErrUKINotStaged distinguishes "the target slot's UKI was never
 // staged there" (image/disk/activate-slot.sh never ran for this disk -
@@ -54,7 +54,7 @@ func Unmount() error {
 }
 
 // Activate mounts espDevice, copies slot's pre-staged UKI
-// (\HAPROXYOS\UKI-<slot>.EFI) over \EFI\BOOT\BOOTX64.EFI, syncs, and
+// (\JANUS\UKI-<slot>.EFI) over \EFI\BOOT\BOOTX64.EFI, syncs, and
 // unmounts - the full sequence for switching to a slot whose UKI is
 // already sitting on the ESP (as opposed to LifecycleService.Upgrade's
 // own ESP write, which stages a *new* UKI from a release bundle first -
@@ -68,7 +68,7 @@ func Activate(espDevice, slot string) error {
 	}
 	defer func() { _ = Unmount() }()
 
-	src := filepath.Join(Mountpoint, "HAPROXYOS", fmt.Sprintf("UKI-%s.EFI", slot))
+	src := filepath.Join(Mountpoint, "JANUS", fmt.Sprintf("UKI-%s.EFI", slot))
 	staged, err := os.ReadFile(src)
 	if err != nil {
 		if os.IsNotExist(err) {

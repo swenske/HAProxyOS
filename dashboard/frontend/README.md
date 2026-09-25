@@ -18,7 +18,7 @@ npm run build
 `vite.config.js` builds straight into `../backend/static` -
 `dashboard/backend/main.go`'s `go:embed` needs the built assets there
 at `go build` time. The build output is committed to the repo (like
-`gen/haproxyos/v1alpha1`) so a plain `go build ./...` never needs a
+`gen/janus/v1alpha1`) so a plain `go build ./...` never needs a
 Node.js toolchain just to compile - regenerate it (via `make
 dashboard-frontend-build`, from the repo root) whenever frontend source
 changes.

@@ -32,7 +32,7 @@ jobs:
             --model claude-haiku-4-5-20251001
             --allowedTools "Read,Grep,Glob,Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh label list:*)"
           prompt: |
-            Triage issue #${{ github.event.issue.number }} on HAProxyOS, an
+            Triage issue #${{ github.event.issue.number }} on Janus, an
             ultra-light, immutable, API-driven Linux distribution (inspired
             by Talos Linux) built around HAProxy, with optional BGP
             (bird)/VRRP (keepalived)/firewall (nftables) modules.

@@ -2,9 +2,9 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.2
 // - protoc             (unknown)
-// source: haproxyos/v1alpha1/haproxy.proto
+// source: janus/v1alpha1/haproxy.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	context "context"
@@ -20,29 +20,29 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HAProxyService_GetConfig_FullMethodName         = "/haproxyos.v1alpha1.HAProxyService/GetConfig"
-	HAProxyService_ApplyConfig_FullMethodName       = "/haproxyos.v1alpha1.HAProxyService/ApplyConfig"
-	HAProxyService_ValidateConfig_FullMethodName    = "/haproxyos.v1alpha1.HAProxyService/ValidateConfig"
-	HAProxyService_Reload_FullMethodName            = "/haproxyos.v1alpha1.HAProxyService/Reload"
-	HAProxyService_Stats_FullMethodName             = "/haproxyos.v1alpha1.HAProxyService/Stats"
-	HAProxyService_ShowInfo_FullMethodName          = "/haproxyos.v1alpha1.HAProxyService/ShowInfo"
-	HAProxyService_BackendList_FullMethodName       = "/haproxyos.v1alpha1.HAProxyService/BackendList"
-	HAProxyService_ServerSetState_FullMethodName    = "/haproxyos.v1alpha1.HAProxyService/ServerSetState"
-	HAProxyService_MapList_FullMethodName           = "/haproxyos.v1alpha1.HAProxyService/MapList"
-	HAProxyService_MapGet_FullMethodName            = "/haproxyos.v1alpha1.HAProxyService/MapGet"
-	HAProxyService_MapUpdate_FullMethodName         = "/haproxyos.v1alpha1.HAProxyService/MapUpdate"
-	HAProxyService_ACLUpdate_FullMethodName         = "/haproxyos.v1alpha1.HAProxyService/ACLUpdate"
-	HAProxyService_CertificateList_FullMethodName   = "/haproxyos.v1alpha1.HAProxyService/CertificateList"
-	HAProxyService_CertificateUpload_FullMethodName = "/haproxyos.v1alpha1.HAProxyService/CertificateUpload"
-	HAProxyService_CertificateDelete_FullMethodName = "/haproxyos.v1alpha1.HAProxyService/CertificateDelete"
+	HAProxyService_GetConfig_FullMethodName         = "/janus.v1alpha1.HAProxyService/GetConfig"
+	HAProxyService_ApplyConfig_FullMethodName       = "/janus.v1alpha1.HAProxyService/ApplyConfig"
+	HAProxyService_ValidateConfig_FullMethodName    = "/janus.v1alpha1.HAProxyService/ValidateConfig"
+	HAProxyService_Reload_FullMethodName            = "/janus.v1alpha1.HAProxyService/Reload"
+	HAProxyService_Stats_FullMethodName             = "/janus.v1alpha1.HAProxyService/Stats"
+	HAProxyService_ShowInfo_FullMethodName          = "/janus.v1alpha1.HAProxyService/ShowInfo"
+	HAProxyService_BackendList_FullMethodName       = "/janus.v1alpha1.HAProxyService/BackendList"
+	HAProxyService_ServerSetState_FullMethodName    = "/janus.v1alpha1.HAProxyService/ServerSetState"
+	HAProxyService_MapList_FullMethodName           = "/janus.v1alpha1.HAProxyService/MapList"
+	HAProxyService_MapGet_FullMethodName            = "/janus.v1alpha1.HAProxyService/MapGet"
+	HAProxyService_MapUpdate_FullMethodName         = "/janus.v1alpha1.HAProxyService/MapUpdate"
+	HAProxyService_ACLUpdate_FullMethodName         = "/janus.v1alpha1.HAProxyService/ACLUpdate"
+	HAProxyService_CertificateList_FullMethodName   = "/janus.v1alpha1.HAProxyService/CertificateList"
+	HAProxyService_CertificateUpload_FullMethodName = "/janus.v1alpha1.HAProxyService/CertificateUpload"
+	HAProxyService_CertificateDelete_FullMethodName = "/janus.v1alpha1.HAProxyService/CertificateDelete"
 )
 
 // HAProxyServiceClient is the client API for HAProxyService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// HAProxyService is HAProxyOS's differentiating API surface: it's what
-// haproxyosctl (and any external controller) uses to configure and drive
+// HAProxyService is Janus's differentiating API surface: it's what
+// janusctl (and any external controller) uses to configure and drive
 // HAProxy instead of editing haproxy.cfg over SSH. See internal/haproxy
 // for the implementation (config render/validate/reload, runtime API
 // client over the stats socket).
@@ -246,8 +246,8 @@ func (c *hAProxyServiceClient) CertificateDelete(ctx context.Context, in *Certif
 // All implementations must embed UnimplementedHAProxyServiceServer
 // for forward compatibility.
 //
-// HAProxyService is HAProxyOS's differentiating API surface: it's what
-// haproxyosctl (and any external controller) uses to configure and drive
+// HAProxyService is Janus's differentiating API surface: it's what
+// janusctl (and any external controller) uses to configure and drive
 // HAProxy instead of editing haproxy.cfg over SSH. See internal/haproxy
 // for the implementation (config render/validate/reload, runtime API
 // client over the stats socket).
@@ -621,7 +621,7 @@ func _HAProxyService_CertificateDelete_Handler(srv interface{}, ctx context.Cont
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
 var HAProxyService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "haproxyos.v1alpha1.HAProxyService",
+	ServiceName: "janus.v1alpha1.HAProxyService",
 	HandlerType: (*HAProxyServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
@@ -688,5 +688,5 @@ var HAProxyService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "haproxyos/v1alpha1/haproxy.proto",
+	Metadata: "janus/v1alpha1/haproxy.proto",
 }

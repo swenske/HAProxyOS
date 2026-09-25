@@ -36,10 +36,10 @@ jobs:
             --model claude-haiku-4-5-20251001
             --allowedTools "Read,Grep,Glob,Bash(gh pr comment:*),Bash(gh pr diff:*),mcp__github_inline_comment__create_inline_comment"
           prompt: |
-            Review pull request #${{ github.event.issue.number }} on HAProxyOS,
+            Review pull request #${{ github.event.issue.number }} on Janus,
             an ultra-light, immutable, API-driven Linux distribution (inspired
             by Talos Linux) built around HAProxy, with a Go/gRPC control-plane
-            daemon (haproxyosd) and CLI (haproxyosctl).
+            daemon (janusd) and CLI (janusctl).
 
             Run `gh pr diff ${{ github.event.issue.number }}` to see exactly
             what changed. Only read additional files when you need

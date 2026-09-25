@@ -85,7 +85,7 @@ func load(dir string) (*Bootstrap, error) {
 }
 
 func bootstrap(dir, hostname string, extraIPs []net.IP) (*Bootstrap, error) {
-	ca, err := NewCA("HAProxyOS node CA: " + hostname)
+	ca, err := NewCA("Janus node CA: " + hostname)
 	if err != nil {
 		return nil, fmt.Errorf("generate CA: %w", err)
 	}

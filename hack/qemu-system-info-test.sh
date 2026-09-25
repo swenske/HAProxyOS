@@ -9,7 +9,7 @@
 # disk.img (image/disk/assemble.sh, slot A) under real OVMF, extract PKI
 # straight from the STATE partition via debugfs (a script can't watch a
 # live console the way a human doing this for real would - see that
-# script's own comment), then call `haproxyosctl system info` over real
+# script's own comment), then call `janusctl system info` over real
 # mTLS and check the printed values are plausible:
 #   - active slot: A (proves VersionResponse.active_slot's
 #     internal/bootslot plumbing actually resolves on a real A/B boot,
@@ -22,13 +22,13 @@
 #   - at least one disk (vda, the virtio-blk root disk) with a nonzero
 #     read count (the boot itself already did plenty of reads)
 #
-# Usage: hack/qemu-system-info-test.sh <disk.img> <haproxyosctl-bin>
+# Usage: hack/qemu-system-info-test.sh <disk.img> <janusctl-bin>
 set -euo pipefail
 
 export PATH="$PATH:/usr/sbin:/sbin"
 
-DISK="${1:?usage: $0 <disk.img> <haproxyosctl-bin>}"
-CTL="${2:?usage: $0 <disk.img> <haproxyosctl-bin>}"
+DISK="${1:?usage: $0 <disk.img> <janusctl-bin>}"
+CTL="${2:?usage: $0 <disk.img> <janusctl-bin>}"
 HTTP_TIMEOUT_SECS="${QEMU_SYSINFO_HTTP_TIMEOUT:-40}"
 HOST_HTTP_PORT="${QEMU_SYSINFO_HTTP_PORT:-18095}"
 HOST_GRPC_PORT="${QEMU_SYSINFO_GRPC_PORT:-18096}"

@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.12
 // 	protoc        (unknown)
-// source: haproxyos/v1alpha1/lifecycle.proto
+// source: janus/v1alpha1/lifecycle.proto
 
-package haproxyosv1alpha1
+package janusv1alpha1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -34,7 +34,7 @@ type ImageSource struct {
 
 func (x *ImageSource) Reset() {
 	*x = ImageSource{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[0]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -46,7 +46,7 @@ func (x *ImageSource) String() string {
 func (*ImageSource) ProtoMessage() {}
 
 func (x *ImageSource) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[0]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -59,7 +59,7 @@ func (x *ImageSource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageSource.ProtoReflect.Descriptor instead.
 func (*ImageSource) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{0}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ImageSource) GetReference() string {
@@ -81,7 +81,7 @@ type InstallRequest struct {
 	Source *ImageSource           `protobuf:"bytes,1,opt,name=source,proto3" json:"source,omitempty"`
 	// Target disk, e.g. "/dev/sda" - not necessarily the disk this node
 	// itself booted from (rejected if it is; that's Upgrade's territory).
-	// Fails if the disk already has a HAProxyOS install (use
+	// Fails if the disk already has a Janus install (use
 	// Rollback/Upgrade instead).
 	Disk          string `protobuf:"bytes,2,opt,name=disk,proto3" json:"disk,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -90,7 +90,7 @@ type InstallRequest struct {
 
 func (x *InstallRequest) Reset() {
 	*x = InstallRequest{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[1]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -102,7 +102,7 @@ func (x *InstallRequest) String() string {
 func (*InstallRequest) ProtoMessage() {}
 
 func (x *InstallRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[1]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -115,7 +115,7 @@ func (x *InstallRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallRequest.ProtoReflect.Descriptor instead.
 func (*InstallRequest) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{1}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *InstallRequest) GetSource() *ImageSource {
@@ -148,7 +148,7 @@ type InstallResponse struct {
 
 func (x *InstallResponse) Reset() {
 	*x = InstallResponse{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[2]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -160,7 +160,7 @@ func (x *InstallResponse) String() string {
 func (*InstallResponse) ProtoMessage() {}
 
 func (x *InstallResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[2]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -173,7 +173,7 @@ func (x *InstallResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InstallResponse.ProtoReflect.Descriptor instead.
 func (*InstallResponse) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{2}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *InstallResponse) GetStage() string {
@@ -208,7 +208,7 @@ type UpgradeRequest struct {
 
 func (x *UpgradeRequest) Reset() {
 	*x = UpgradeRequest{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[3]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -220,7 +220,7 @@ func (x *UpgradeRequest) String() string {
 func (*UpgradeRequest) ProtoMessage() {}
 
 func (x *UpgradeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[3]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -233,7 +233,7 @@ func (x *UpgradeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeRequest.ProtoReflect.Descriptor instead.
 func (*UpgradeRequest) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{3}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *UpgradeRequest) GetSource() *ImageSource {
@@ -273,7 +273,7 @@ type UpgradeResponse struct {
 
 func (x *UpgradeResponse) Reset() {
 	*x = UpgradeResponse{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[4]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -285,7 +285,7 @@ func (x *UpgradeResponse) String() string {
 func (*UpgradeResponse) ProtoMessage() {}
 
 func (x *UpgradeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[4]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -298,7 +298,7 @@ func (x *UpgradeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpgradeResponse.ProtoReflect.Descriptor instead.
 func (*UpgradeResponse) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{4}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpgradeResponse) GetStage() string {
@@ -331,7 +331,7 @@ type RollbackResponse struct {
 
 func (x *RollbackResponse) Reset() {
 	*x = RollbackResponse{}
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[5]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -343,7 +343,7 @@ func (x *RollbackResponse) String() string {
 func (*RollbackResponse) ProtoMessage() {}
 
 func (x *RollbackResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_haproxyos_v1alpha1_lifecycle_proto_msgTypes[5]
+	mi := &file_janus_v1alpha1_lifecycle_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -356,7 +356,7 @@ func (x *RollbackResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RollbackResponse.ProtoReflect.Descriptor instead.
 func (*RollbackResponse) Descriptor() ([]byte, []int) {
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{5}
+	return file_janus_v1alpha1_lifecycle_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RollbackResponse) GetActiveSlot() string {
@@ -366,23 +366,23 @@ func (x *RollbackResponse) GetActiveSlot() string {
 	return ""
 }
 
-var File_haproxyos_v1alpha1_lifecycle_proto protoreflect.FileDescriptor
+var File_janus_v1alpha1_lifecycle_proto protoreflect.FileDescriptor
 
-const file_haproxyos_v1alpha1_lifecycle_proto_rawDesc = "" +
+const file_janus_v1alpha1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	"\"haproxyos/v1alpha1/lifecycle.proto\x12\x12haproxyos.v1alpha1\x1a\x1bgoogle/protobuf/empty.proto\"C\n" +
+	"\x1ejanus/v1alpha1/lifecycle.proto\x12\x0ejanus.v1alpha1\x1a\x1bgoogle/protobuf/empty.proto\"C\n" +
 	"\vImageSource\x12\x1c\n" +
 	"\treference\x18\x01 \x01(\tR\treference\x12\x16\n" +
-	"\x06sha256\x18\x02 \x01(\tR\x06sha256\"]\n" +
-	"\x0eInstallRequest\x127\n" +
-	"\x06source\x18\x01 \x01(\v2\x1f.haproxyos.v1alpha1.ImageSourceR\x06source\x12\x12\n" +
+	"\x06sha256\x18\x02 \x01(\tR\x06sha256\"Y\n" +
+	"\x0eInstallRequest\x123\n" +
+	"\x06source\x18\x01 \x01(\v2\x1b.janus.v1alpha1.ImageSourceR\x06source\x12\x12\n" +
 	"\x04disk\x18\x02 \x01(\tR\x04disk\"]\n" +
 	"\x0fInstallResponse\x12\x14\n" +
 	"\x05stage\x18\x01 \x01(\tR\x05stage\x12\x1a\n" +
 	"\bprogress\x18\x02 \x01(\x01R\bprogress\x12\x18\n" +
-	"\amessage\x18\x03 \x01(\tR\amessage\"\xa7\x01\n" +
-	"\x0eUpgradeRequest\x127\n" +
-	"\x06source\x18\x01 \x01(\v2\x1f.haproxyos.v1alpha1.ImageSourceR\x06source\x12&\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\"\xa3\x01\n" +
+	"\x0eUpgradeRequest\x123\n" +
+	"\x06source\x18\x01 \x01(\v2\x1b.janus.v1alpha1.ImageSourceR\x06source\x12&\n" +
 	"\x0fwait_for_health\x18\x02 \x01(\bR\rwaitForHealth\x124\n" +
 	"\x16health_timeout_seconds\x18\x03 \x01(\rR\x14healthTimeoutSeconds\"]\n" +
 	"\x0fUpgradeResponse\x12\x14\n" +
@@ -391,43 +391,43 @@ const file_haproxyos_v1alpha1_lifecycle_proto_rawDesc = "" +
 	"\amessage\x18\x03 \x01(\tR\amessage\"3\n" +
 	"\x10RollbackResponse\x12\x1f\n" +
 	"\vactive_slot\x18\x01 \x01(\tR\n" +
-	"activeSlot2\x88\x02\n" +
-	"\x10LifecycleService\x12T\n" +
-	"\aInstall\x12\".haproxyos.v1alpha1.InstallRequest\x1a#.haproxyos.v1alpha1.InstallResponse0\x01\x12T\n" +
-	"\aUpgrade\x12\".haproxyos.v1alpha1.UpgradeRequest\x1a#.haproxyos.v1alpha1.UpgradeResponse0\x01\x12H\n" +
-	"\bRollback\x12\x16.google.protobuf.Empty\x1a$.haproxyos.v1alpha1.RollbackResponseBGZEgithub.com/swenske/HAProxyOS/gen/haproxyos/v1alpha1;haproxyosv1alpha1b\x06proto3"
+	"activeSlot2\xf4\x01\n" +
+	"\x10LifecycleService\x12L\n" +
+	"\aInstall\x12\x1e.janus.v1alpha1.InstallRequest\x1a\x1f.janus.v1alpha1.InstallResponse0\x01\x12L\n" +
+	"\aUpgrade\x12\x1e.janus.v1alpha1.UpgradeRequest\x1a\x1f.janus.v1alpha1.UpgradeResponse0\x01\x12D\n" +
+	"\bRollback\x12\x16.google.protobuf.Empty\x1a .janus.v1alpha1.RollbackResponseB;Z9github.com/swenske/Janus/gen/janus/v1alpha1;janusv1alpha1b\x06proto3"
 
 var (
-	file_haproxyos_v1alpha1_lifecycle_proto_rawDescOnce sync.Once
-	file_haproxyos_v1alpha1_lifecycle_proto_rawDescData []byte
+	file_janus_v1alpha1_lifecycle_proto_rawDescOnce sync.Once
+	file_janus_v1alpha1_lifecycle_proto_rawDescData []byte
 )
 
-func file_haproxyos_v1alpha1_lifecycle_proto_rawDescGZIP() []byte {
-	file_haproxyos_v1alpha1_lifecycle_proto_rawDescOnce.Do(func() {
-		file_haproxyos_v1alpha1_lifecycle_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_haproxyos_v1alpha1_lifecycle_proto_rawDesc), len(file_haproxyos_v1alpha1_lifecycle_proto_rawDesc)))
+func file_janus_v1alpha1_lifecycle_proto_rawDescGZIP() []byte {
+	file_janus_v1alpha1_lifecycle_proto_rawDescOnce.Do(func() {
+		file_janus_v1alpha1_lifecycle_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_janus_v1alpha1_lifecycle_proto_rawDesc), len(file_janus_v1alpha1_lifecycle_proto_rawDesc)))
 	})
-	return file_haproxyos_v1alpha1_lifecycle_proto_rawDescData
+	return file_janus_v1alpha1_lifecycle_proto_rawDescData
 }
 
-var file_haproxyos_v1alpha1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
-var file_haproxyos_v1alpha1_lifecycle_proto_goTypes = []any{
-	(*ImageSource)(nil),      // 0: haproxyos.v1alpha1.ImageSource
-	(*InstallRequest)(nil),   // 1: haproxyos.v1alpha1.InstallRequest
-	(*InstallResponse)(nil),  // 2: haproxyos.v1alpha1.InstallResponse
-	(*UpgradeRequest)(nil),   // 3: haproxyos.v1alpha1.UpgradeRequest
-	(*UpgradeResponse)(nil),  // 4: haproxyos.v1alpha1.UpgradeResponse
-	(*RollbackResponse)(nil), // 5: haproxyos.v1alpha1.RollbackResponse
+var file_janus_v1alpha1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_janus_v1alpha1_lifecycle_proto_goTypes = []any{
+	(*ImageSource)(nil),      // 0: janus.v1alpha1.ImageSource
+	(*InstallRequest)(nil),   // 1: janus.v1alpha1.InstallRequest
+	(*InstallResponse)(nil),  // 2: janus.v1alpha1.InstallResponse
+	(*UpgradeRequest)(nil),   // 3: janus.v1alpha1.UpgradeRequest
+	(*UpgradeResponse)(nil),  // 4: janus.v1alpha1.UpgradeResponse
+	(*RollbackResponse)(nil), // 5: janus.v1alpha1.RollbackResponse
 	(*emptypb.Empty)(nil),    // 6: google.protobuf.Empty
 }
-var file_haproxyos_v1alpha1_lifecycle_proto_depIdxs = []int32{
-	0, // 0: haproxyos.v1alpha1.InstallRequest.source:type_name -> haproxyos.v1alpha1.ImageSource
-	0, // 1: haproxyos.v1alpha1.UpgradeRequest.source:type_name -> haproxyos.v1alpha1.ImageSource
-	1, // 2: haproxyos.v1alpha1.LifecycleService.Install:input_type -> haproxyos.v1alpha1.InstallRequest
-	3, // 3: haproxyos.v1alpha1.LifecycleService.Upgrade:input_type -> haproxyos.v1alpha1.UpgradeRequest
-	6, // 4: haproxyos.v1alpha1.LifecycleService.Rollback:input_type -> google.protobuf.Empty
-	2, // 5: haproxyos.v1alpha1.LifecycleService.Install:output_type -> haproxyos.v1alpha1.InstallResponse
-	4, // 6: haproxyos.v1alpha1.LifecycleService.Upgrade:output_type -> haproxyos.v1alpha1.UpgradeResponse
-	5, // 7: haproxyos.v1alpha1.LifecycleService.Rollback:output_type -> haproxyos.v1alpha1.RollbackResponse
+var file_janus_v1alpha1_lifecycle_proto_depIdxs = []int32{
+	0, // 0: janus.v1alpha1.InstallRequest.source:type_name -> janus.v1alpha1.ImageSource
+	0, // 1: janus.v1alpha1.UpgradeRequest.source:type_name -> janus.v1alpha1.ImageSource
+	1, // 2: janus.v1alpha1.LifecycleService.Install:input_type -> janus.v1alpha1.InstallRequest
+	3, // 3: janus.v1alpha1.LifecycleService.Upgrade:input_type -> janus.v1alpha1.UpgradeRequest
+	6, // 4: janus.v1alpha1.LifecycleService.Rollback:input_type -> google.protobuf.Empty
+	2, // 5: janus.v1alpha1.LifecycleService.Install:output_type -> janus.v1alpha1.InstallResponse
+	4, // 6: janus.v1alpha1.LifecycleService.Upgrade:output_type -> janus.v1alpha1.UpgradeResponse
+	5, // 7: janus.v1alpha1.LifecycleService.Rollback:output_type -> janus.v1alpha1.RollbackResponse
 	5, // [5:8] is the sub-list for method output_type
 	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
@@ -435,26 +435,26 @@ var file_haproxyos_v1alpha1_lifecycle_proto_depIdxs = []int32{
 	0, // [0:2] is the sub-list for field type_name
 }
 
-func init() { file_haproxyos_v1alpha1_lifecycle_proto_init() }
-func file_haproxyos_v1alpha1_lifecycle_proto_init() {
-	if File_haproxyos_v1alpha1_lifecycle_proto != nil {
+func init() { file_janus_v1alpha1_lifecycle_proto_init() }
+func file_janus_v1alpha1_lifecycle_proto_init() {
+	if File_janus_v1alpha1_lifecycle_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_haproxyos_v1alpha1_lifecycle_proto_rawDesc), len(file_haproxyos_v1alpha1_lifecycle_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_janus_v1alpha1_lifecycle_proto_rawDesc), len(file_janus_v1alpha1_lifecycle_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_haproxyos_v1alpha1_lifecycle_proto_goTypes,
-		DependencyIndexes: file_haproxyos_v1alpha1_lifecycle_proto_depIdxs,
-		MessageInfos:      file_haproxyos_v1alpha1_lifecycle_proto_msgTypes,
+		GoTypes:           file_janus_v1alpha1_lifecycle_proto_goTypes,
+		DependencyIndexes: file_janus_v1alpha1_lifecycle_proto_depIdxs,
+		MessageInfos:      file_janus_v1alpha1_lifecycle_proto_msgTypes,
 	}.Build()
-	File_haproxyos_v1alpha1_lifecycle_proto = out.File
-	file_haproxyos_v1alpha1_lifecycle_proto_goTypes = nil
-	file_haproxyos_v1alpha1_lifecycle_proto_depIdxs = nil
+	File_janus_v1alpha1_lifecycle_proto = out.File
+	file_janus_v1alpha1_lifecycle_proto_goTypes = nil
+	file_janus_v1alpha1_lifecycle_proto_depIdxs = nil
 }
