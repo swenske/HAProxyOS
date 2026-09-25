@@ -41,11 +41,16 @@ result before building the image.
 
 ## Run
 
-The dashboard needs two things exposed:
+The dashboard needs three things exposed:
 
-- **`:8080`** (configurable via `-addr`) - the main UI (node list,
-  add/remove). Nothing sensitive transits here - just registered
-  names/addresses, never a credential.
+- **`:8080`** (configurable via `-addr`) - the main UI. Behind a single
+  admin password, forced setup on first visit (see `internal/auth`) -
+  nothing else here needs a credential, just registered names/
+  addresses.
+- **`:8443`** (configurable via `-register-addr`) - where a node
+  self-registers (see `internal/pending`); self-announced nodes land in
+  a "pending" queue, approved or rejected by hand in the UI, not
+  admitted automatically.
 - **`9500-9599`** - a *pool* of per-node HTTPS listeners, one per
   registered node, each requiring a TLS client certificate issued by
   that node's own CA. This is a dynamic range, not a single fixed
@@ -59,6 +64,7 @@ The dashboard needs two things exposed:
 docker run -d \
   --name janus-controller \
   -p 8080:8080 \
+  -p 8443:8443 \
   -p 9500-9599:9500-9599 \
   -v janus-controller-data:/data \
   janus-controller

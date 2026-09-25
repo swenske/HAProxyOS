@@ -34,11 +34,14 @@ COPY --from=build /out/dashboardd /dashboardd
 # gets an anonymous volume rather than writing into the container's own
 # throwaway layer.
 VOLUME /data
-# :8080 - the main port (node list/add/remove, never a credential).
+# :8080 - the main port (node list/add/remove, behind admin auth - see
+# internal/auth). :8443 - node self-registration (see internal/pending
+# and register.go), a fixed port, not a pool, since it's one endpoint
+# shared by every registering node, not per-node like what follows.
 # 9500-9599 - the per-node mTLS-gated listener pool (see dashboard/
 # backend/main.go's portRangeStart/End) - Docker's static -p mapping
 # doesn't cover a dynamic pool well, so a real run needs either
 # --network host or a pre-mapped "-p 9500-9599:9500-9599" - see
 # dashboard/README.md for the full run command.
-EXPOSE 8080 9500-9599
+EXPOSE 8080 8443 9500-9599
 ENTRYPOINT ["/dashboardd"]

@@ -40,6 +40,7 @@ import (
 
 	"github.com/swenske/Janus/dashboard/backend/internal/auth"
 	"github.com/swenske/Janus/dashboard/backend/internal/nodeproxy"
+	"github.com/swenske/Janus/dashboard/backend/internal/pending"
 	"github.com/swenske/Janus/dashboard/backend/internal/store"
 )
 
@@ -69,12 +70,18 @@ const (
 
 func main() {
 	addr := flag.String("addr", ":8080", "main HTTP address (node list, add/remove - never a credential)")
+	registerAddr := flag.String("register-addr", ":8443", "TLS address nodes self-register against (see internal/pending) - not the same port pool as approved nodes' own per-node listeners")
 	dataDir := flag.String("data-dir", "/data", "persistent data directory (Docker volume) - node registry + this dashboard's own TLS identity")
 	flag.Parse()
 
 	st, err := store.Open(*dataDir)
 	if err != nil {
 		log.Fatalf("open store: %v", err)
+	}
+
+	pendingStore, err := pending.Open(*dataDir)
+	if err != nil {
+		log.Fatalf("open pending store: %v", err)
 	}
 
 	authStore, err := auth.Open(*dataDir)
@@ -90,7 +97,7 @@ func main() {
 		log.Fatalf("dashboard TLS identity: %v", err)
 	}
 
-	app := &app{store: st, auth: authStore, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
+	app := &app{store: st, pending: pendingStore, auth: authStore, serverCert: serverCert, listeners: map[string]*nodeproxy.Listener{}}
 	for _, n := range st.List() {
 		if err := app.startListener(n); err != nil {
 			// A node whose listener fails to start (e.g. its port is
@@ -99,6 +106,10 @@ func main() {
 			// dashboard down on restart.
 			log.Printf("node %s (%s): start listener: %v", n.ID, n.Name, err)
 		}
+	}
+
+	if err := app.startRegistrationListener(*registerAddr); err != nil {
+		log.Fatalf("registration listener: %v", err)
 	}
 
 	spa, err := fs.Sub(staticFiles, "static")
@@ -113,6 +124,7 @@ func main() {
 	mux.HandleFunc("/api/auth/logout", app.handleAuthLogout)
 	mux.HandleFunc("/api/nodes", app.requireAuth(app.handleNodes))
 	mux.HandleFunc("/api/nodes/", app.requireAuth(app.handleNode))
+	mux.HandleFunc("/api/pending", app.requireAuth(app.handlePendingList))
 	mux.Handle("/", http.FileServerFS(spa))
 
 	log.Printf("dashboardd listening on %s", *addr)
@@ -121,6 +133,7 @@ func main() {
 
 type app struct {
 	store      *store.Store
+	pending    *pending.Store
 	auth       *auth.Store
 	serverCert tls.Certificate
 

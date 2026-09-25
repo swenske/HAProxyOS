@@ -99,6 +99,21 @@
 #      and - after the dashboardd restart in step 9, since sessions are
 #      deliberately in-memory-only and don't survive a restart - a fresh
 #      login call is needed before the registry is reachable again.
+#   11. Point 2 suite, tranche 2: node self-registration (dashboard/
+#      backend/internal/pending + register.go's startRegistrationListener)
+#      - a synthetic node CA + service credential (standing in for what
+#      a real janusd would generate locally and send - tranche 2 is
+#      the Controller side only, janusd doesn't self-register yet)
+#      POSTed to the dedicated TLS registration port (separate from
+#      both :8080 and the per-node pool - see startRegistrationListener's
+#      own doc comment for why). Checks: a real registration is
+#      accepted and shows up in GET /api/pending (auth-gated, like
+#      everything else under /api/); missing required fields refused
+#      with 400; a cert/key pair that doesn't actually parse together
+#      refused with 400 and a real error, not a generic failure; the
+#      pending entry survives a dashboardd restart (same reasoning as
+#      the node registry itself - a node only announces once per boot,
+#      so losing this to an in-memory store would strand it).
 #
 # Usage: hack/qemu-dashboard-test.sh <disk.img> <dashboardd-bin>
 set -euo pipefail
@@ -111,6 +126,7 @@ HTTP_TIMEOUT_SECS="${QEMU_DASHBOARD_HTTP_TIMEOUT:-40}"
 HOST_HTTP_PORT="${QEMU_DASHBOARD_NODE_HTTP_PORT:-18120}"
 HOST_GRPC_PORT="${QEMU_DASHBOARD_NODE_GRPC_PORT:-18121}"
 DASHBOARD_ADDR_PORT="${QEMU_DASHBOARD_ADDR_PORT:-18122}"
+DASHBOARD_REGISTER_PORT="${QEMU_DASHBOARD_REGISTER_PORT:-18123}"
 
 OVMF_CODE="${OVMF_CODE:-/usr/share/OVMF/OVMF_CODE_4M.fd}"
 OVMF_VARS_TEMPLATE="${OVMF_VARS_TEMPLATE:-/usr/share/OVMF/OVMF_VARS_4M.fd}"
@@ -167,7 +183,7 @@ done
 
 # --- start dashboardd ---
 mkdir -p "$WORKDIR/data"
-"$DASHBOARDD" -addr ":${DASHBOARD_ADDR_PORT}" -data-dir "$WORKDIR/data" > "$WORKDIR/dashboardd.log" 2>&1 &
+"$DASHBOARDD" -addr ":${DASHBOARD_ADDR_PORT}" -register-addr ":${DASHBOARD_REGISTER_PORT}" -data-dir "$WORKDIR/data" > "$WORKDIR/dashboardd.log" 2>&1 &
 DASHBOARD_PID=$!
 sleep 1
 if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
@@ -200,6 +216,54 @@ setup_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "h
 second_setup_code="$(curl -s -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
 [ "$second_setup_code" = "400" ] || { echo "Dashboard test FAILED: a second setup call should be refused, got $second_setup_code" >&2; exit 1; }
 echo "Auth OK: /api/nodes refused with no session, setup validated (short password, second-setup refusal), session cookie established"
+
+# --- Point 2 suite, tranche 2: node self-registration (dashboard/backend/
+# internal/pending + register.go) - a synthetic node CA + service
+# credential standing in for what a real janusd would generate locally
+# and send (janusd itself doesn't self-register yet - this tranche is
+# the Controller side only) ---
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+  -keyout "$WORKDIR/reg-node-ca.key" -out "$WORKDIR/reg-node-ca.crt" -days 1 -nodes -subj "/CN=synthetic node CA" >/dev/null 2>&1
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+  -keyout "$WORKDIR/reg-service.key" -out "$WORKDIR/reg-service.csr" -nodes -subj "/CN=service" >/dev/null 2>&1
+openssl x509 -req -in "$WORKDIR/reg-service.csr" -CA "$WORKDIR/reg-node-ca.crt" -CAkey "$WORKDIR/reg-node-ca.key" \
+  -CAcreateserial -out "$WORKDIR/reg-service.crt" -days 1 >/dev/null 2>&1
+python3 -c '
+import json, sys
+ca, crt, key, out = sys.argv[1:5]
+req = {
+    "name": "self-registered-test-node",
+    "address": "10.0.0.7:9505",
+    "ca_cert_pem": open(ca).read(),
+    "service_cert_pem": open(crt).read(),
+    "service_key_pem": open(key).read(),
+}
+open(out, "w").write(json.dumps(req))
+' "$WORKDIR/reg-node-ca.crt" "$WORKDIR/reg-service.crt" "$WORKDIR/reg-service.key" "$WORKDIR/register.json"
+
+REGISTER_RESP="$(curl -sk -X POST "https://127.0.0.1:${DASHBOARD_REGISTER_PORT}/register" -H "Content-Type: application/json" -d @"$WORKDIR/register.json")"
+PENDING_ID="$(echo "$REGISTER_RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])' 2>/dev/null)"
+[ -n "$PENDING_ID" ] || { echo "Dashboard test FAILED: registration didn't return an id: $REGISTER_RESP" >&2; exit 1; }
+
+PENDING_LIST="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
+echo "$PENDING_LIST" | grep -qF "\"id\":\"$PENDING_ID\"" || { echo "Dashboard test FAILED: GET /api/pending didn't list the self-registered node: $PENDING_LIST" >&2; exit 1; }
+echo "$PENDING_LIST" | grep -q '"name":"self-registered-test-node"' || { echo "Dashboard test FAILED: pending entry missing its name: $PENDING_LIST" >&2; exit 1; }
+echo "Node self-registration OK: $REGISTER_RESP, listed in GET /api/pending"
+
+missing_fields_code="$(curl -sk -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1:${DASHBOARD_REGISTER_PORT}/register" -H "Content-Type: application/json" -d '{"name":"incomplete"}')"
+[ "$missing_fields_code" = "400" ] || { echo "Dashboard test FAILED: registration with missing fields should be 400, got $missing_fields_code" >&2; exit 1; }
+
+python3 -c '
+import json, sys
+ca, crt, out = sys.argv[1:4]
+req = {"name": "bad-key", "address": "10.0.0.8:9505", "ca_cert_pem": open(ca).read(), "service_cert_pem": open(crt).read(), "service_key_pem": "not a real key"}
+open(out, "w").write(json.dumps(req))
+' "$WORKDIR/reg-node-ca.crt" "$WORKDIR/reg-service.crt" "$WORKDIR/register-bad-key.json"
+bad_key_resp="$(curl -sk -X POST "https://127.0.0.1:${DASHBOARD_REGISTER_PORT}/register" -H "Content-Type: application/json" -d @"$WORKDIR/register-bad-key.json" -w '\n%{http_code}')"
+bad_key_code="$(echo "$bad_key_resp" | tail -1)"
+[ "$bad_key_code" = "400" ] || { echo "Dashboard test FAILED: registration with a malformed key should be 400, got $bad_key_code: $bad_key_resp" >&2; exit 1; }
+echo "$bad_key_resp" | grep -q "don't form a valid certificate" || { echo "Dashboard test FAILED: malformed key should get a real, actionable error, got: $bad_key_resp" >&2; exit 1; }
+echo "Registration error paths OK: missing fields and a malformed cert/key pair both refused with a real error"
 
 # --- add-node via .pfx upload (the frontend's default mode as of
 # tranche 6 - see dashboard/backend/main.go's parseAddNodeRequest and
@@ -419,7 +483,7 @@ echo "Delete OK: node unregistered, its listener stopped accepting connections e
 curl -s -b "$COOKIE_JAR" -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes" -H "Content-Type: application/json" -d @"$WORKDIR/add-node.json" > /dev/null
 kill "$DASHBOARD_PID"
 wait "$DASHBOARD_PID" 2>/dev/null || true
-"$DASHBOARDD" -addr ":${DASHBOARD_ADDR_PORT}" -data-dir "$WORKDIR/data" > "$WORKDIR/dashboardd-restart.log" 2>&1 &
+"$DASHBOARDD" -addr ":${DASHBOARD_ADDR_PORT}" -register-addr ":${DASHBOARD_REGISTER_PORT}" -data-dir "$WORKDIR/data" > "$WORKDIR/dashboardd-restart.log" 2>&1 &
 DASHBOARD_PID=$!
 sleep 1
 
@@ -433,6 +497,10 @@ stale_session_code="$(curl -s -b "$COOKIE_JAR" -o /dev/null -w '%{http_code}' "h
 relogin_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/login" -H "Content-Type: application/json" -d '{"password":"dashboard-test-admin-pw"}')"
 [ "$relogin_code" = "204" ] || { echo "Dashboard test FAILED: re-login after restart with the same (persisted) password should succeed, got $relogin_code" >&2; exit 1; }
 echo "Auth persistence OK: the admin password survives a restart, the session doesn't - a fresh login is required"
+
+PENDING_AFTER_RESTART="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
+echo "$PENDING_AFTER_RESTART" | grep -qF "\"id\":\"$PENDING_ID\"" || { echo "Dashboard test FAILED: the pending self-registration didn't survive a dashboardd restart: $PENDING_AFTER_RESTART" >&2; exit 1; }
+echo "Pending persistence OK: the self-registered node's pending entry survived a dashboardd restart"
 
 RESTART_LIST="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/nodes")"
 echo "$RESTART_LIST" | grep -q '"name":"test-node"' || { echo "Dashboard test FAILED: node registry didn't survive a restart: $RESTART_LIST" >&2; cat "$WORKDIR/dashboardd-restart.log" >&2; exit 1; }
