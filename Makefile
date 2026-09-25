@@ -363,6 +363,16 @@ qemu-lifecycle-upgrade-health-test: build disk-image
 lifecycle-install-test: build rootfs-build
 	./hack/lifecycle-install-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/bzImage $(BUILD_DIR)/haproxy $(BUILD_DIR)/janusd $(BIN_DIR)/janusctl
 
+# Point 2 suite, tranche 5: proves a node provisioned with a Controller
+# at Install time (tranche 4's controller_address/controller_ca_cert)
+# genuinely self-registers with a real, running Janus Controller
+# (dashboardd) on its own first boot - no RPC call from the test script
+# drives the registration itself, only cmd/janusd's own background
+# attempt (internal/selfregister). Requires root (sudo, same reasoning
+# as lifecycle-install-test above) and janusctl/dashboardd built.
+qemu-self-register-test: build dashboard-build rootfs-build
+	./hack/qemu-self-register-test.sh $(BUILD_DIR)/rootfs $(BUILD_DIR)/bzImage $(BUILD_DIR)/haproxy $(BUILD_DIR)/janusd $(BIN_DIR)/janusctl $(BIN_DIR)/dashboardd
+
 # Phase 3 cont'd: assembles a real Unified Kernel Image (UKI) - kernel +
 # exact boot cmdline, one PE/COFF executable - via `ukify`
 # (systemd-ukify), and a FAT32 ESP image with it installed at the

@@ -35,6 +35,7 @@ import (
 	"github.com/swenske/Janus/internal/bootrevert"
 	"github.com/swenske/Janus/internal/haproxy"
 	"github.com/swenske/Janus/internal/pki"
+	"github.com/swenske/Janus/internal/selfregister"
 )
 
 // version is set via -ldflags "-X main.version=..." by the release build
@@ -135,6 +136,15 @@ func main() {
 		go confirmBootHealth(marker, haproxyMgr)
 	}
 
+	// Point 2 suite, tranche 5: if this node was provisioned with a
+	// Controller (LifecycleService.Install's controller_address/
+	// controller_ca_cert, see internal/api/install.go), and hasn't
+	// already announced itself, do so now - in the background, same
+	// reasoning as bootcommit above: gRPC must start regardless, and
+	// the overwhelming majority of boots have no Controller configured
+	// at all.
+	go selfRegisterIfConfigured(pkiBootstrap.CA, hostname, *addr)
+
 	tlsConfig := pkiBootstrap.CA.ServerTLSConfig(pkiBootstrap.ServerCert)
 	srv := grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(tlsConfig)),
@@ -203,4 +213,45 @@ func confirmBootHealth(marker *bootcommit.Marker, mgr *haproxy.Manager) {
 	}
 	// !confirmed && err == nil: the revert (and reboot) succeeded -
 	// nothing further to do, the machine is already on its way down.
+}
+
+// selfRegisterIfConfigured is Point 2 suite tranche 5's actual trigger:
+// reads internal/selfregister.Dir (bind-mounted from STATE's own
+// controller/ subdirectory by rootfs/init's mountState - see that
+// function's own comment), and if a Controller was provisioned for this
+// node (LifecycleService.Install's controller_address/
+// controller_ca_cert) and it hasn't already announced itself, does so
+// now. A failed attempt (Controller unreachable, say) is simply logged
+// and left for the next boot to retry - selfregister.MarkRegistered is
+// only ever written on success, so nothing here needs its own retry
+// loop.
+func selfRegisterIfConfigured(ca *pki.CA, hostname, grpcAddr string) {
+	cfg, err := selfregister.Read(selfregister.Dir)
+	if err != nil {
+		log.Printf("selfregister: read config: %v", err)
+		return
+	}
+	if cfg == nil {
+		return // no Controller was provisioned for this node - the overwhelming majority of boots
+	}
+	if selfregister.AlreadyRegistered(selfregister.Dir) {
+		return
+	}
+
+	advertiseAddr, err := selfregister.DetectAdvertiseAddress(cfg.Address, grpcAddr)
+	if err != nil {
+		log.Printf("selfregister: determine address to advertise to Controller at %s: %v", cfg.Address, err)
+		return
+	}
+
+	log.Printf("selfregister: announcing to Controller at %s as %s (%s)", cfg.Address, hostname, advertiseAddr)
+	if err := selfregister.Register(cfg, ca, hostname, advertiseAddr); err != nil {
+		log.Printf("selfregister: registration failed, will retry on next boot: %v", err)
+		return
+	}
+	if err := selfregister.MarkRegistered(selfregister.Dir); err != nil {
+		log.Printf("selfregister: mark registered: %v", err)
+		return
+	}
+	log.Printf("selfregister: successfully announced to Controller at %s, awaiting approval", cfg.Address)
 }

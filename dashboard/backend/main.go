@@ -72,6 +72,7 @@ func main() {
 	addr := flag.String("addr", ":8080", "main HTTP address (node list, add/remove - never a credential)")
 	registerAddr := flag.String("register-addr", ":8443", "TLS address nodes self-register against (see internal/pending) - not the same port pool as approved nodes' own per-node listeners")
 	dataDir := flag.String("data-dir", "/data", "persistent data directory (Docker volume) - node registry + this dashboard's own TLS identity")
+	advertiseAddresses := flag.String("advertise-address", "", "comma-separated extra IPs/hostnames to add to this dashboard's TLS identity certificate, alongside loopback and this host's own local IPs (see loadOrCreateDashboardIdentity) - needed whenever a node or browser reaches -register-addr/the per-node ports through an address this process can't see on its own network interfaces (Docker bridge networking's host-side published port, a NAT/port-forwarded address, ...); only used the first time the identity is generated, since it's cached to -data-dir afterward - delete <data-dir>/dashboard-identity.{crt,key} to regenerate after changing this")
 	flag.Parse()
 
 	st, err := store.Open(*dataDir)
@@ -92,7 +93,7 @@ func main() {
 		log.Printf("no admin password set yet - the UI will force a one-time setup screen on first visit")
 	}
 
-	serverCert, err := loadOrCreateDashboardIdentity(*dataDir)
+	serverCert, err := loadOrCreateDashboardIdentity(*dataDir, *advertiseAddresses)
 	if err != nil {
 		log.Fatalf("dashboard TLS identity: %v", err)
 	}
@@ -370,7 +371,21 @@ func (a *app) allocatePort() (int, error) {
 // internal/pki's own CA+Issue machinery rather than writing new crypto
 // code here) is enough for a first slice; a real certificate (or letting
 // the operator supply their own) is a follow-up, not a blocker.
-func loadOrCreateDashboardIdentity(dataDir string) (tls.Certificate, error) {
+//
+// extraAdvertiseAddresses (comma-separated, from -advertise-address) was
+// added for Point 2 suite tranche 5: a self-registering node dials
+// -register-addr directly (no browser involved), and Go's net/http
+// client - unlike a browser - never lets an operator click through a
+// hostname/SAN mismatch, so any deployment where this process can't see
+// its own externally-reachable address on a local network interface
+// (Docker bridge networking's host-side published port most commonly,
+// but also a NAT/port-forwarded address) would otherwise refuse every
+// self-registration attempt outright, even a genuinely legitimate one -
+// found while building the node-side registration flow (internal/
+// selfregister), not yet a reported real deployment failure, but the
+// exact shape dashboard/README.md's own documented `docker run -p
+// 8443:8443 ...` example produces.
+func loadOrCreateDashboardIdentity(dataDir, extraAdvertiseAddresses string) (tls.Certificate, error) {
 	certPath := dataDir + "/dashboard-identity.crt"
 	keyPath := dataDir + "/dashboard-identity.key"
 
@@ -396,9 +411,21 @@ func loadOrCreateDashboardIdentity(dataDir string) (tls.Certificate, error) {
 	// with zero SANs at all, which real modern TLS clients (browsers
 	// included) reject outright regardless of CommonName.
 	ips := append([]net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}, pki.LocalIPs()...)
+	dnsNames := []string{"localhost"}
+	for _, entry := range strings.Split(extraAdvertiseAddresses, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if ip := net.ParseIP(entry); ip != nil {
+			ips = append(ips, ip)
+		} else {
+			dnsNames = append(dnsNames, entry)
+		}
+	}
 	certPEM, keyPEM, err := ca.Issue(pki.IssueOptions{
 		CommonName:  "dashboard",
-		DNSNames:    []string{"localhost"},
+		DNSNames:    dnsNames,
 		IPAddresses: ips,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 	})

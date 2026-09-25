@@ -198,6 +198,26 @@ func mountState() {
 	} else {
 		bindMount(bootDir, bootcommit.Dir)
 	}
+
+	// controller/: Point 2 suite tranche 5 - node self-registration
+	// config (address/ca.crt), written by LifecycleService.Install onto
+	// STATE at provisioning time (internal/api/install.go's
+	// writeControllerConfig), or left entirely absent for the
+	// overwhelming majority of nodes with no Controller at all. Needs
+	// no first-boot seeding trick like haproxy/ does - either Install
+	// already wrote content here or it didn't, and either way there's
+	// nothing this boot needs to create beyond the directory itself.
+	// Consumed by cmd/janusd's own internal/selfregister, not by
+	// rootfs/init - bind-mounted here (a literal path, not an import of
+	// that package, matching how "/etc/janus/pki"/"/etc/haproxy" above
+	// are also literals) purely so STATE-backed content survives the
+	// same tmpfs /etc overmount everything else under /etc/janus does.
+	ctrlDir := filepath.Join(stateRoot, "controller")
+	if err := os.MkdirAll(ctrlDir, 0o755); err != nil {
+		fmt.Printf("init: mkdir %s: %v\n", ctrlDir, err)
+	} else {
+		bindMount(ctrlDir, "/etc/janus/controller")
+	}
 }
 
 func seedPersistentHaproxyCfg(dir string) {

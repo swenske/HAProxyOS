@@ -77,6 +77,31 @@ every registered node and re-issues a new dashboard identity, which
 also invalidates any per-node listener certificate your browser
 already trusted.
 
+The `docker run` example above uses Docker's default bridge networking,
+which means this process's own view of its network interfaces (used to
+build its TLS identity certificate's SAN list, see
+`loadOrCreateDashboardIdentity`) is the container's internal bridge IP,
+not whatever address a node or browser actually reaches `-p 8443:8443`/
+`-p 9500-9599:9500-9599` through from outside. A browser tolerates this
+for the per-node view (it lets you click through the mismatch); a
+self-registering node's own HTTP client does not - it will refuse the
+handshake outright. If nodes will self-register through a Docker
+bridge, NAT, or a port-forwarded address, pass that address explicitly:
+
+```sh
+docker run -d \
+  --name janus-controller \
+  -p 8080:8080 \
+  -p 8443:8443 \
+  -p 9500-9599:9500-9599 \
+  -v janus-controller-data:/data \
+  janus-controller -advertise-address YOUR.PUBLIC.IP.HERE
+```
+
+Only read the first time the identity is generated (it's cached to
+`-data-dir` afterward) - delete `<data-dir>/dashboard-identity.{crt,key}`
+and restart to regenerate it after changing this.
+
 Then open `http://<host>:8080/` and add a node: you'll need its
 display name, its gRPC address (`ip:9505` by default), its `ca.crt`
 (public, not sensitive), and a client credential that already has
