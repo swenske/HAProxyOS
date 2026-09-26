@@ -716,7 +716,15 @@ jobs:
       # dockerhub-description, a well-established action for exactly
       # this API call.
       - name: Update the Docker Hub repository description
+        # env: is required on *this* step too, not inherited from the
+        # push step above - GitHub Actions' `env` context in a step's
+        # own `if:` only ever sees that step's own env block (job/
+        # workflow-level env would also work, but no step's env leaks
+        # into a sibling step) - a real run's own "skipped" outcome
+        # caught this, not assumed from how the push step above reads.
         if: ${{ env.DOCKERHUB_TOKEN != '' }}
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         uses: peter-evans/dockerhub-description@v4
         with:
           username: swenske
