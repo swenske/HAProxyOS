@@ -703,6 +703,28 @@ jobs:
           docker push swenske/janus-controller:${{ github.sha }}
           docker logout
 
+      # User-requested: the repository page itself (hub.docker.com/r/
+      # swenske/janus-controller) - a short description (its ~100-char
+      # search-result blurb) and the full Overview (logo + how-to-run,
+      # dashboard/dockerhub-overview.md - a standalone file, not the
+      # full dashboard/README.md verbatim, since Docker Hub renders it
+      # outside this repo and relative links/badges wouldn't resolve
+      # there). Idempotent - re-uploading the same content every run is
+      # a harmless no-op - so this runs alongside the image push itself
+      # rather than as a separate one-off action, reusing the same
+      # DOCKERHUB_TOKEN (no new secret) via peter-evans/
+      # dockerhub-description, a well-established action for exactly
+      # this API call.
+      - name: Update the Docker Hub repository description
+        if: ${{ env.DOCKERHUB_TOKEN != '' }}
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: swenske
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: swenske/janus-controller
+          short-description: "Web UI to manage Janus nodes: self-registration, live stats, HAProxy config - HTTPS-only"
+          readme-filepath: dashboard/dockerhub-overview.md
+
       # TODO(Phase 3 cont'd): image/iso, image/vmware, upload artifacts
       # to a GitHub Release once a version scheme exists.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
