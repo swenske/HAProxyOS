@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="https://raw.githubusercontent.com/swenske/Janus/main/brand/png/janus-logo-mono-h256.png" alt="Janus" height="80" />
+  <img src="https://raw.githubusercontent.com/swenske/Janus/main/brand/logo/janus-logo-mono-adaptive.svg" alt="Janus" height="80" />
 </div>
 
 # Janus Controller
