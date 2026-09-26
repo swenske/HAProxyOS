@@ -18,11 +18,14 @@ never extract that key - so your browser's certificate can never be
 reused to dial the node directly, only to prove to the dashboard that
 you're allowed to look at that node's own view.
 
-**Status:** not yet published anywhere - build and run it locally for
-now. Publishing an image (to the maintainer's own Docker Hub) is
-deferred until the project's rename decision lands, so an image isn't
-built under a name that immediately needs republishing under another
-one. This is a local build/run howto in the meantime.
+**Status:** published to Docker Hub as
+[`swenske/janus-controller`](https://hub.docker.com/r/swenske/janus-controller)
+(`:latest` and per-commit `:<sha>` tags) - `.github/workflows/
+image-build.yml`'s own manually-dispatched, self-hosted "Push the
+dashboard image to Docker Hub" step builds and pushes it, gated behind
+a `DOCKERHUB_TOKEN` repository secret so a fork PR (or a run before
+that secret exists) just skips the push, not the build. Building and
+running locally, as below, still works exactly the same either way.
 
 ## Build
 
@@ -70,7 +73,7 @@ docker run -d \
   --name janus-controller \
   --network host \
   -v janus-controller-data:/data \
-  janus-controller
+  swenske/janus-controller
 ```
 
 Or with Compose:
@@ -78,7 +81,7 @@ Or with Compose:
 ```yaml
 services:
   janus-controller:
-    image: janus-controller
+    image: swenske/janus-controller
     container_name: janus-controller
     network_mode: host
     restart: unless-stopped
@@ -88,6 +91,9 @@ services:
 volumes:
   janus-controller-data:
 ```
+
+(Built and running locally instead of pulled from Docker Hub? Swap the
+image for the locally-built `janus-controller` tag - see Build above.)
 
 `-v .../data` is a real requirement, not optional: it's where the node
 registry and the dashboard's own TLS identity persist across restarts
@@ -126,7 +132,7 @@ docker run -d \
   --network host \
   -v janus-controller-data:/data \
   -v /path/to/certs:/certs:ro \
-  janus-controller -tls-cert /certs/fullchain.pem -tls-key /certs/privkey.pem
+  swenske/janus-controller -tls-cert /certs/fullchain.pem -tls-key /certs/privkey.pem
 ```
 
 Both flags must be set together; when set, `-advertise-address` and the

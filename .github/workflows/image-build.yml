@@ -672,6 +672,37 @@ jobs:
           path: build/janus.qcow2
           retention-days: 30
 
+      # User-requested: publish the dashboard image to the maintainer's
+      # own Docker Hub - deferred ever since the Dockerfile itself
+      # landed, until the rename decision settled (see dashboard/
+      # README.md's own earlier "Status" note) and now explicitly
+      # asked for. The build itself needs no secret and is cheap, so it
+      # runs unconditionally, every dispatch, worth catching a real
+      # build break here regardless of whether a push follows; only the
+      # login+push step is gated behind DOCKERHUB_TOKEN (a Docker Hub
+      # access token - hub.docker.com's own Account Settings -> Security
+      # -> New Access Token, then `gh secret set DOCKERHUB_TOKEN`), so a
+      # fork PR or a run before that secret exists skips cleanly - same
+      # `env:` indirection the Secure Boot step above needs, since
+      # `secrets` isn't allowed directly in a step's own `if:`. The
+      # Docker Hub *username* isn't a secret (it's public on the pushed
+      # tag itself either way), so it's a plain literal here, not a
+      # second secret to manage.
+      - name: Build the dashboard Docker image
+        run: make dashboard-image
+      - name: Push the dashboard image to Docker Hub
+        if: ${{ env.DOCKERHUB_TOKEN != '' }}
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "$DOCKERHUB_TOKEN" | docker login -u swenske --password-stdin
+          docker tag janus-controller swenske/janus-controller:latest
+          docker tag janus-controller swenske/janus-controller:${{ github.sha }}
+          docker push swenske/janus-controller:latest
+          docker push swenske/janus-controller:${{ github.sha }}
+          docker logout
+
       # TODO(Phase 3 cont'd): image/iso, image/vmware, upload artifacts
       # to a GitHub Release once a version scheme exists.
       # TODO(Phase 5): pkgs/bird, pkgs/keepalived, pkgs/nftables - built
