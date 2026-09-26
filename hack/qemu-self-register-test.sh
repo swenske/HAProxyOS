@@ -59,6 +59,15 @@
 #      STATE, survives the reboot) actually stops the node from
 #      re-announcing itself every boot.
 #
+# dashboardd's own main port (DASHBOARD_ADDR_PORT) is HTTPS-only (user-
+# requested - see dashboard/backend/main.go's own doc comment), so
+# every curl call against it here uses https:// -k, same as hack/
+# qemu-dashboard-test.sh - a real image-build.yml run caught this
+# script's own copy having been missed when that change first landed
+# (curl got Go's stdlib's own friendly 400 "sent an HTTP request to an
+# HTTPS server", surfaced here as "dashboard admin setup returned 400,
+# want 204"), fixed by applying the exact same fix, not by inspection.
+#
 # Usage: hack/qemu-self-register-test.sh <rootfs-dir> <bzImage> <haproxy-bin> <janusd-bin> <janusctl-bin> <dashboardd-bin>
 set -euo pipefail
 
@@ -131,7 +140,7 @@ if ! kill -0 "$DASHBOARD_PID" 2>/dev/null; then
 fi
 
 COOKIE_JAR="$WORKDIR/cookies.txt"
-setup_code="$(curl -s -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"self-register-test-admin-pw"}')"
+setup_code="$(curl -sk -c "$COOKIE_JAR" -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/auth/setup" -H "Content-Type: application/json" -d '{"password":"self-register-test-admin-pw"}')"
 [ "$setup_code" = "204" ] || { echo "Self-register test FAILED: dashboard admin setup returned $setup_code, want 204" >&2; exit 1; }
 echo "Part 1 OK: dashboardd running natively, admin auth established"
 
@@ -221,7 +230,7 @@ echo "Part 3 OK: the Controller-provisioned disk boots for real"
 PENDING_JSON=""
 DEADLINE=$((SECONDS + REGISTER_TIMEOUT_SECS))
 while [ "$SECONDS" -lt "$DEADLINE" ]; do
-  PENDING_JSON="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
+  PENDING_JSON="$(curl -sk -b "$COOKIE_JAR" "https://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
   [ "$PENDING_JSON" != "null" ] && [ -n "$PENDING_JSON" ] && break
   sleep 1
 done
@@ -261,7 +270,7 @@ echo "Part 4 OK: node self-registered on its own - id=$PENDING_ID name=$PENDING_
 # approvePending correctly plumbed the node's *self-reported* CA into
 # the listener it started.
 # =========================================================================
-APPROVE_RESP="$(curl -s -b "$COOKIE_JAR" -w '\n%{http_code}' -X POST "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending/${PENDING_ID}/approve")"
+APPROVE_RESP="$(curl -sk -b "$COOKIE_JAR" -w '\n%{http_code}' -X POST "https://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending/${PENDING_ID}/approve")"
 APPROVE_CODE="$(echo "$APPROVE_RESP" | tail -1)"
 APPROVE_BODY="$(echo "$APPROVE_RESP" | sed '$d')"
 [ "$APPROVE_CODE" = "201" ] || { echo "Self-register test FAILED: approve returned $APPROVE_CODE: $APPROVE_BODY" >&2; exit 1; }
@@ -353,7 +362,7 @@ if grep -q "selfregister: successfully announced\|selfregister: registration fai
   cat "$LOG2" >&2
   exit 1
 fi
-PENDING_AFTER_REBOOT="$(curl -s -b "$COOKIE_JAR" "http://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
+PENDING_AFTER_REBOOT="$(curl -sk -b "$COOKIE_JAR" "https://127.0.0.1:${DASHBOARD_ADDR_PORT}/api/pending")"
 if [ "$PENDING_AFTER_REBOOT" != "null" ] && [ -n "$PENDING_AFTER_REBOOT" ]; then
   echo "Self-register test FAILED: a second pending entry appeared after the second boot: $PENDING_AFTER_REBOOT" >&2
   exit 1
