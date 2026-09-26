@@ -63,7 +63,7 @@ func (a *app) handleAuthLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: "", Path: "/", MaxAge: -1,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -74,13 +74,12 @@ func (a *app) startSession(w http.ResponseWriter) {
 		http.Error(w, "create session: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Not Secure: this port is plain HTTP by design (see internal/auth's
-	// own doc comment) - Secure would just make the browser silently
-	// drop the cookie. HttpOnly + SameSite=Strict are the mitigations
-	// that don't depend on the transport being TLS.
+	// Secure is safe (not just cosmetic) now that this port is
+	// HTTPS-only (see dashboard/backend/main.go's own doc comment) - a
+	// browser never sends this cookie in the clear.
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookieName, Value: token, Path: "/", MaxAge: 24 * 60 * 60,
-		HttpOnly: true, SameSite: http.SameSiteStrictMode,
+		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

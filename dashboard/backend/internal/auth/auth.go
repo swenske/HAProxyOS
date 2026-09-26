@@ -4,15 +4,9 @@
 // single-operator tool, not a multi-user system, so a username/roles
 // model would be unused complexity.
 //
-// The main port stays plain HTTP by design (see dashboard/backend/
-// main.go's own doc comment - "nothing sensitive transits here" no
-// longer fully holds once a password and a session cookie cross it, but
-// upgrading this port to TLS is a real architecture change of its own,
-// not bundled into this one - the honest interim position, matching how
-// self-hosted admin tools commonly work, is: this port is meant for a
-// trusted network, and anyone exposing it more broadly should put a
-// TLS-terminating reverse proxy in front of it. Documented as a known
-// limitation, not hidden.
+// The main port is HTTPS-only (see dashboard/backend/main.go's own doc
+// comment) - the session cookie is marked Secure accordingly, so a
+// browser refuses to ever send it in the clear.
 package auth
 
 import (

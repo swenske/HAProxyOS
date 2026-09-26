@@ -1,15 +1,26 @@
 // Command dashboardd is the management dashboard's backend - see the
 // rebranding/dashboard/client-native plan for the full architecture.
 // Serves the SPA + a REST/JSON API for managing the node registry on one
-// plain HTTP port (behind a single admin password - see internal/auth -
-// forced setup on first run, session-cookie-gated after that; this port
-// still isn't TLS-protected in transit, a known, documented limitation
-// rather than a hidden one - see internal/auth's own doc comment), and
-// one dedicated HTTPS listener per registered node (see dashboard/
-// backend/internal/nodeproxy) requiring a TLS client certificate signed
-// by that node's own CA - a browser already holding a valid client cert
-// for that node gets prompted to select it the first time it connects
-// to that node's own port.
+// HTTPS-only port (behind a single admin password - see internal/auth -
+// forced setup on first run, session-cookie-gated after that; the
+// session cookie is marked Secure, so this transport guarantee actually
+// matters, not just cosmetic), and one dedicated HTTPS listener per
+// registered node (see dashboard/backend/internal/nodeproxy) requiring a
+// TLS client certificate signed by that node's own CA - a browser
+// already holding a valid client cert for that node gets prompted to
+// select it the first time it connects to that node's own port.
+//
+// Every TLS surface this process serves (the main UI, node self-
+// registration, and every per-node listener) shares one identity
+// certificate - see loadOrCreateDashboardIdentity: self-signed and
+// auto-generated on first run by default (persisted to -data-dir, so
+// it's stable across restarts - a fresh one every restart would mean a
+// new browser trust warning every time for no reason), or -tls-cert/
+// -tls-key to supply a real one instead (e.g. a Let's Encrypt
+// certificate, or an internal CA's). Either way it's self-signed or
+// otherwise not in a browser's default trust store, so a first visit to
+// the main UI needs the same one-time click-through a per-node view
+// already needed.
 package main
 
 import (
@@ -59,20 +70,21 @@ var staticFiles embed.FS
 // portRangeStart/End: the pool of per-node listener ports - see the
 // rebranding/dashboard plan's own architecture section for why a
 // dynamic per-node port (not one shared port) is what makes native
-// browser client-certificate selection work per node at all. Docker
-// exposure needs either --network host or a pre-mapped
-// "-p 9500-9599:9500-9599" - documented in dashboard/README.md once
-// that lands (Dockerfile/publishing is a later tranche).
+// browser client-certificate selection work per node at all. This is
+// exactly why the container needs --network host in practice, not just
+// a wide -p range - see dashboard/README.md.
 const (
 	portRangeStart = 9500
 	portRangeEnd   = 9599
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "main HTTP address (node list, add/remove - never a credential)")
+	addr := flag.String("addr", ":8080", "main HTTPS address (node list, add/remove - never a credential)")
 	registerAddr := flag.String("register-addr", ":8443", "TLS address nodes self-register against (see internal/pending) - not the same port pool as approved nodes' own per-node listeners")
 	dataDir := flag.String("data-dir", "/data", "persistent data directory (Docker volume) - node registry + this dashboard's own TLS identity")
-	advertiseAddresses := flag.String("advertise-address", "", "comma-separated extra IPs/hostnames to add to this dashboard's TLS identity certificate, alongside loopback and this host's own local IPs (see loadOrCreateDashboardIdentity) - needed whenever a node or browser reaches -register-addr/the per-node ports through an address this process can't see on its own network interfaces (Docker bridge networking's host-side published port, a NAT/port-forwarded address, ...); only used the first time the identity is generated, since it's cached to -data-dir afterward - delete <data-dir>/dashboard-identity.{crt,key} to regenerate after changing this")
+	advertiseAddresses := flag.String("advertise-address", "", "comma-separated extra IPs/hostnames to add to this dashboard's TLS identity certificate, alongside loopback and this host's own local IPs (see loadOrCreateDashboardIdentity) - needed whenever a node or browser reaches -addr/-register-addr/the per-node ports through an address this process can't see on its own network interfaces (Docker bridge networking's host-side published port, a NAT/port-forwarded address, ...); only used the first time the identity is generated (or ignored entirely if -tls-cert/-tls-key are set), since it's cached to -data-dir afterward - delete <data-dir>/dashboard-identity.{crt,key} to regenerate after changing this")
+	tlsCertFile := flag.String("tls-cert", "", "path to a PEM certificate for this dashboard's own TLS identity (used for -addr, -register-addr, and every per-node listener) - if set, together with -tls-key, replaces the auto-generated self-signed one entirely; both flags must be set together")
+	tlsKeyFile := flag.String("tls-key", "", "path to the PEM private key matching -tls-cert")
 	flag.Parse()
 
 	st, err := store.Open(*dataDir)
@@ -93,7 +105,7 @@ func main() {
 		log.Printf("no admin password set yet - the UI will force a one-time setup screen on first visit")
 	}
 
-	serverCert, err := loadOrCreateDashboardIdentity(*dataDir, *advertiseAddresses)
+	serverCert, err := loadOrCreateDashboardIdentity(*dataDir, *advertiseAddresses, *tlsCertFile, *tlsKeyFile)
 	if err != nil {
 		log.Fatalf("dashboard TLS identity: %v", err)
 	}
@@ -137,8 +149,16 @@ func main() {
 	mux.HandleFunc("/api/controller-info", app.requireAuth(app.handleControllerInfo))
 	mux.Handle("/", http.FileServerFS(spa))
 
-	log.Printf("dashboardd listening on %s", *addr)
-	log.Fatal(http.ListenAndServe(*addr, mux))
+	srv := &http.Server{
+		Addr:      *addr,
+		Handler:   mux,
+		TLSConfig: &tls.Config{Certificates: []tls.Certificate{serverCert}},
+	}
+	log.Printf("dashboardd listening on %s (HTTPS only)", *addr)
+	// Empty cert/key file arguments: srv.TLSConfig.Certificates above is
+	// what's actually used - ListenAndServeTLS falls back to it exactly
+	// for this case (see its own doc comment).
+	log.Fatal(srv.ListenAndServeTLS("", ""))
 }
 
 type app struct {
@@ -376,19 +396,26 @@ func (a *app) allocatePort() (int, error) {
 	return 0, fmt.Errorf("no free port in [%d, %d] - %d nodes already registered", portRangeStart, portRangeEnd, len(used))
 }
 
-// loadOrCreateDashboardIdentity gives every per-node listener a stable
-// TLS server certificate across restarts (a fresh self-signed identity
-// every restart would mean a new browser trust-warning every time,
-// unrelated to whether anything actually changed). This certificate's
-// own trust has nothing to do with authenticating *callers* - that's the
-// per-node CA check in dashboard/backend/internal/nodeproxy - it only
-// establishes the encrypted channel, so a self-signed one (reusing
-// internal/pki's own CA+Issue machinery rather than writing new crypto
-// code here) is enough for a first slice; a real certificate (or letting
-// the operator supply their own) is a follow-up, not a blocker.
+// loadOrCreateDashboardIdentity gives every TLS surface this process
+// serves (the main UI, node self-registration, and every per-node
+// listener) one stable server certificate across restarts (a fresh
+// self-signed identity every restart would mean a new browser trust-
+// warning every time, unrelated to whether anything actually changed).
+// This certificate's own trust has nothing to do with authenticating
+// *callers* - that's the per-node CA check in dashboard/backend/
+// internal/nodeproxy, and the admin password behind the main UI - it
+// only establishes the encrypted channel.
 //
-// extraAdvertiseAddresses (comma-separated, from -advertise-address) was
-// added for Point 2 suite tranche 5: a self-registering node dials
+// tlsCertFile/tlsKeyFile (from -tls-cert/-tls-key) let an operator
+// supply a real certificate instead (a Let's Encrypt certificate, or
+// one from an internal CA) - checked first, before ever touching
+// dataDir; either both are set or neither is. Otherwise, a self-signed
+// one (reusing internal/pki's own CA+Issue machinery rather than
+// writing new crypto code here) is generated once and persisted to
+// dataDir.
+//
+// extraAdvertiseAddresses (comma-separated, from -advertise-address)
+// was added for Point 2 suite tranche 5: a self-registering node dials
 // -register-addr directly (no browser involved), and Go's net/http
 // client - unlike a browser - never lets an operator click through a
 // hostname/SAN mismatch, so any deployment where this process can't see
@@ -399,8 +426,18 @@ func (a *app) allocatePort() (int, error) {
 // found while building the node-side registration flow (internal/
 // selfregister), not yet a reported real deployment failure, but the
 // exact shape dashboard/README.md's own documented `docker run -p
-// 8443:8443 ...` example produces.
-func loadOrCreateDashboardIdentity(dataDir, extraAdvertiseAddresses string) (tls.Certificate, error) {
+// 8443:8443 ...` example produces. Only meaningful for the
+// auto-generated identity - ignored entirely when a real certificate is
+// supplied via -tls-cert/-tls-key, since that certificate's own SANs
+// are the operator's responsibility.
+func loadOrCreateDashboardIdentity(dataDir, extraAdvertiseAddresses, tlsCertFile, tlsKeyFile string) (tls.Certificate, error) {
+	if tlsCertFile != "" || tlsKeyFile != "" {
+		if tlsCertFile == "" || tlsKeyFile == "" {
+			return tls.Certificate{}, fmt.Errorf("-tls-cert and -tls-key must both be set together")
+		}
+		return tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+	}
+
 	certPath := dataDir + "/dashboard-identity.crt"
 	keyPath := dataDir + "/dashboard-identity.key"
 

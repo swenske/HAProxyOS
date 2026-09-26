@@ -41,33 +41,52 @@ result before building the image.
 
 ## Run
 
-The dashboard needs three things exposed:
+**The container must run with `--network host`.** It listens on three
+distinct ports, one of which (the per-node listener pool, below) is a
+*dynamic range*, not a single fixed port - browser TLS client-
+certificate selection is negotiated per *origin* (host:port), so
+managing more than one node needs a distinct origin per node. Docker's
+static `-p host:container` mapping can't represent that cleanly (mapping
+a 100-port range works but is awkward, and still leaves this process
+unable to see its own real, externally-reachable address on its network
+interfaces - see `-advertise-address` further down for that specific
+symptom). `--network host` sidesteps all of it at once: every port
+`dashboardd` binds is immediately reachable at the host's own address,
+with no mapping and no address-detection gap.
 
-- **`:8080`** (configurable via `-addr`) - the main UI. Behind a single
-  admin password, forced setup on first visit (see `internal/auth`) -
-  nothing else here needs a credential, just registered names/
-  addresses.
+- **`:8080`** (configurable via `-addr`) - the main UI, **HTTPS only**.
+  Behind a single admin password, forced setup on first visit (see
+  `internal/auth`).
 - **`:8443`** (configurable via `-register-addr`) - where a node
   self-registers (see `internal/pending`); self-announced nodes land in
   a "pending" queue, approved or rejected by hand in the UI, not
   admitted automatically.
 - **`9500-9599`** - a *pool* of per-node HTTPS listeners, one per
   registered node, each requiring a TLS client certificate issued by
-  that node's own CA. This is a dynamic range, not a single fixed
-  port (browser TLS client-certificate selection is negotiated per
-  *origin*, so managing more than one node needs a distinct origin -
-  port - per node) - Docker's static `-p host:container` mapping
-  doesn't represent a range cleanly, so a real run needs either
-  `--network host` or a pre-mapped range:
+  that node's own CA.
 
 ```sh
 docker run -d \
   --name janus-controller \
-  -p 8080:8080 \
-  -p 8443:8443 \
-  -p 9500-9599:9500-9599 \
+  --network host \
   -v janus-controller-data:/data \
   janus-controller
+```
+
+Or with Compose:
+
+```yaml
+services:
+  janus-controller:
+    image: janus-controller
+    container_name: janus-controller
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - janus-controller-data:/data
+
+volumes:
+  janus-controller-data:
 ```
 
 `-v .../data` is a real requirement, not optional: it's where the node
@@ -77,40 +96,55 @@ every registered node and re-issues a new dashboard identity, which
 also invalidates any per-node listener certificate your browser
 already trusted.
 
-The `docker run` example above uses Docker's default bridge networking,
-which means this process's own view of its network interfaces (used to
-build its TLS identity certificate's SAN list, see
-`loadOrCreateDashboardIdentity`) is the container's internal bridge IP,
-not whatever address a node or browser actually reaches `-p 8443:8443`/
-`-p 9500-9599:9500-9599` through from outside. A browser tolerates this
-for the per-node view (it lets you click through the mismatch); a
-self-registering node's own HTTP client does not - it will refuse the
-handshake outright. If nodes will self-register through a Docker
-bridge, NAT, or a port-forwarded address, pass that address explicitly:
+### TLS identity
+
+Every port above shares one TLS server certificate
+(`loadOrCreateDashboardIdentity`) - by default a self-signed one,
+generated on first run and persisted to `-data-dir`, so your browser's
+one-time trust click-through (same as any per-node view already needs)
+survives restarts. Its SAN list covers `localhost`/`127.0.0.1`/`::1`
+plus every real address this process can see on its own network
+interfaces - with `--network host`, that's the host's actual LAN
+address(es) directly, no extra configuration needed. Pass
+`-advertise-address YOUR.IP.OR.HOSTNAME` (comma-separated for more than
+one) only if you're *not* using `--network host` and this process can't
+otherwise see the address a node or browser will actually reach it
+through (Docker bridge networking's own internal IP is a real example -
+a self-registering node's plain `net/http` client, unlike a browser,
+can't click through a hostname/SAN mismatch, so it would refuse the
+handshake outright without this). Only read the first time the identity
+is generated - delete `<data-dir>/dashboard-identity.{crt,key}` and
+restart to regenerate it after changing this.
+
+To use your own certificate instead (a Let's Encrypt one, or one from
+an internal CA) - modifiable at any time, unlike the auto-generated
+one - mount it in and point `-tls-cert`/`-tls-key` at it:
 
 ```sh
 docker run -d \
   --name janus-controller \
-  -p 8080:8080 \
-  -p 8443:8443 \
-  -p 9500-9599:9500-9599 \
+  --network host \
   -v janus-controller-data:/data \
-  janus-controller -advertise-address YOUR.PUBLIC.IP.HERE
+  -v /path/to/certs:/certs:ro \
+  janus-controller -tls-cert /certs/fullchain.pem -tls-key /certs/privkey.pem
 ```
 
-Only read the first time the identity is generated (it's cached to
-`-data-dir` afterward) - delete `<data-dir>/dashboard-identity.{crt,key}`
-and restart to regenerate it after changing this.
+Both flags must be set together; when set, `-advertise-address` and the
+auto-generated identity are skipped entirely - that certificate's own
+SAN list is then your responsibility.
 
-Then open `http://<host>:8080/` and add a node: you'll need its
-display name, its gRPC address (`ip:9505` by default), its `ca.crt`
-(public, not sensitive), and a client credential that already has
-`os:admin` on that node - either the one `janusd` printed to its
-console on first boot, or one you generated yourself via `janusctl
-pki generate-client-config`. That credential is used exactly once, to
-call `GenerateClientConfiguration` and obtain a fresh service
-credential for the dashboard's own use - it is never written to disk
-itself (see the architecture note above).
+### Adding a node
+
+Open `https://<host>:8080/` (note **https** - the click-through warning
+on first visit is expected with the default self-signed certificate)
+and add a node: you'll need its display name, its gRPC address
+(`ip:9505` by default), its `ca.crt` (public, not sensitive), and a
+client credential that already has `os:admin` on that node - either the
+one `janusd` printed to its console on first boot, or one you generated
+yourself via `janusctl pki generate-client-config`. That credential is
+used exactly once, to call `GenerateClientConfiguration` and obtain a
+fresh service credential for the dashboard's own use - it is never
+written to disk itself (see the architecture note above).
 
 A node can also register itself with this Controller automatically at
 first boot instead, if it was provisioned with `janusctl lifecycle
@@ -132,6 +166,8 @@ For local development without Docker:
 make dashboard-build   # -> bin/dashboardd
 ./bin/dashboardd -addr :8080 -data-dir ./dashboard-data
 ```
+
+Open `https://localhost:8080/` (not `http://`) - a self-signed certificate is generated into `./dashboard-data` on first run.
 
 ## Verification
 
